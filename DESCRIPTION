@@ -1,0 +1,32 @@
+Package: infForest
+Type: Package
+Title: Inference Forests: Nonparametric Inference with Tree Ensembles
+Version: 0.1.0
+Authors@R: person("Nathaniel", "O'Connell", 
+                  email = "nathaniel.oconnell@wfusm.edu",
+                  role = c("aut", "cre"),
+                  comment = c(ORCID = ""))
+Description: Provides a complete framework for nonparametric effect estimation 
+    and inference from random forests. Fits inference forests with standardized 
+    splitting criteria and softmax variable selection, extracts effect estimates 
+    for binary and continuous predictors on any outcome type, constructs 
+    nonlinear effect curves, estimates interactions of arbitrary order, and 
+    provides valid confidence intervals via procedure-aligned synthetic 
+    resampling (PASR). Prediction intervals for deployed forests are also 
+    supported. Based on the theoretical framework of O'Connell (2026).
+License: GPL (>= 3)
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.3.3
+Depends: R (>= 4.0.0)
+Imports:
+    inf.ranger (>= 0.1.0),
+    Rcpp (>= 1.0.0),
+    data.table
+Remotes:
+    NateOConnellPhD/inf.ranger
+LinkingTo: Rcpp
+Suggests:
+    future,
+    future.apply,
+    testthat (>= 3.0.0)
