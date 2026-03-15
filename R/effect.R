@@ -49,7 +49,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 
   check_infForest(object)
   check_varname(object, var)
-  if (!object$honesty) stop("Effect estimation requires honesty = TRUE.")
+
 
   type <- match.arg(type)
   x_var <- object$X[[var]]
@@ -93,8 +93,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   grid_hi <- max(at_vals, unname(quantile(x_var, q_hi)))
 
   curve_result <- .honest_build_curve(object, var, grid_lo, grid_hi,
-                                      n_honest = n_honest, bw = bw,
-                                      subset = subset)
+                                       n_honest = n_honest, bw = bw,
+                                       subset = subset)
 
   # Extract all pairwise contrasts (hi > lo)
   n_at <- length(at_vals)
@@ -147,9 +147,9 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     hon_B <- if (!is.null(subset)) intersect(fs$idxB, subset) else fs$idxB
     hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
     est_AB <- .extract_binary_one_direction(fs$rfA, object$X, object$Y,
-                                            honest_idx = hon_B, var = var)
+                                             honest_idx = hon_B, var = var)
     est_BA <- .extract_binary_one_direction(fs$rfB, object$X, object$Y,
-                                            honest_idx = hon_A, var = var)
+                                             honest_idx = hon_A, var = var)
     all_estimates[r] <- (est_AB + est_BA) / 2
   }
 
@@ -241,9 +241,9 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   for (r in seq_along(object$forests)) {
     fs <- object$forests[[r]]
     est_AB <- .extract_binary_multi_one_direction(fs$rfA, object$X, object$Y,
-                                                  honest_idx = fs$idxB, vars = vars)
+                                                   honest_idx = fs$idxB, vars = vars)
     est_BA <- .extract_binary_multi_one_direction(fs$rfB, object$X, object$Y,
-                                                  honest_idx = fs$idxA, vars = vars)
+                                                   honest_idx = fs$idxA, vars = vars)
     all_estimates[r, ] <- (est_AB + est_BA) / 2
   }
 
@@ -299,6 +299,11 @@ print.infForest_effect <- function(x, ...) {
 
   if (x$var_type == "binary") {
     cat("  Estimate:   ", round(x$estimate, 4), "\n")
+    if (!is.null(x$se)) {
+      cat("  SE:         ", round(x$se, 4), "\n")
+      cat("  95% CI:      [", round(x$ci_lower, 4), ", ", round(x$ci_upper, 4), "]\n")
+      cat("  p-value:    ", format.pval(x$pval, digits = 3), "\n")
+    }
   } else {
     cat("  Intervals:  ", x$n_intervals, "\n")
     cat("\n  Pairwise contrasts (per unit):\n")
@@ -306,6 +311,11 @@ print.infForest_effect <- function(x, ...) {
     for (k in seq_len(nrow(df))) {
       cat(sprintf("    %s vs %s  [%.3f vs %.3f]:  %.4f\n",
                   df$hi[k], df$lo[k], df$hi_val[k], df$lo_val[k], df$estimate[k]))
+    }
+    if (!is.null(x$se)) {
+      cat(sprintf("\n  Primary contrast SE: %.4f\n", x$se))
+      cat(sprintf("  95%% CI: [%.4f, %.4f]\n", x$ci_lower, x$ci_upper))
+      cat(sprintf("  p-value: %s\n", format.pval(x$pval, digits = 3)))
     }
   }
   invisible(x)

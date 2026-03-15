@@ -1,7 +1,3 @@
-#' @useDynLib infForest, .registration = TRUE
-#' @importFrom Rcpp evalCpp
-NULL
-
 #' @keywords internal
 logit_fn <- function(z) 1 / (1 + exp(-z))
 

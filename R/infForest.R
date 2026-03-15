@@ -13,12 +13,6 @@
 #' @param sample.fraction Fraction of observations per tree. Default 1.0
 #'   (full sample).
 #' @param replace Logical; sample with replacement? Default \code{FALSE}.
-#'   Bootstrap resampling (\code{TRUE}) reduces effective sample size per tree
-#'   to ~63\% of the training fold, which compounds with the honesty split to
-#'   yield ~0.63 * n/2 unique observations per tree. Subsampling without
-#'   replacement (\code{FALSE}) uses the full training fold.
-#' @param honesty Logical; use honest cross-fitting? Default \code{TRUE}.
-#'   When \code{TRUE}, data are split into build and estimation folds.
 #' @param honesty.splits Number of independent fold assignments to average
 #'   over. Default 5. Higher values reduce fold-assignment variance.
 #' @param penalize Logical; use standardized splitting criterion? Default
@@ -33,6 +27,11 @@
 #' @param num.threads Number of threads for ranger. Default 1.
 #' @param seed Random seed for reproducibility. Default \code{NULL}.
 #' @param verbose Logical; print progress? Default \code{FALSE}.
+#' @param fold_assignments Optional list of fold assignment vectors. If
+#'   provided, these are used instead of generating random fold assignments.
+#'   Each element is an integer vector of length n with values 1 or 2.
+#'   Length of the list determines \code{honesty.splits}. Used internally
+#'   by PASR to ensure paired forests share the same fold assignments.
 #'
 #' @return An object of class \code{infForest} containing:
 #' \describe{
@@ -62,14 +61,14 @@ infForest <- function(formula,
                       min.node.size = 10L,
                       sample.fraction = 1.0,
                       replace = FALSE,
-                      honesty = TRUE,
                       honesty.splits = 5L,
                       penalize = TRUE,
                       softmax = FALSE,
                       probability = NULL,
                       num.threads = 1L,
                       seed = NULL,
-                      verbose = FALSE) {
+                      verbose = FALSE,
+                      fold_assignments = NULL) {
 
   cl <- match.call()
 
@@ -97,10 +96,10 @@ infForest <- function(formula,
   if (is.null(mtry)) mtry <- floor(sqrt(p))
   if (!is.null(seed)) set.seed(seed)
 
-  if (replace && honesty) {
-    warning("replace = TRUE with honesty = TRUE reduces effective sample size per tree to ~63% of each fold. ",
+  if (replace) {
+    warning("replace = TRUE reduces effective sample size per tree to ~63% of each fold. ",
             "With n/2 observations per fold, each tree uses only ~0.63 * n/2 unique observations for structure. ",
-            "Consider replace = FALSE (the default) for honest estimation.")
+            "Consider replace = FALSE (the default).")
   }
 
   X_num <- as.matrix(X)
@@ -125,59 +124,54 @@ infForest <- function(formula,
     args
   }
 
-  # --- Fit forests ---
-  if (honesty) {
-    # Cross-fitted honest estimation
-    forests <- list()
-    fold_list <- list()
+  # --- Fit forests (cross-fitted honest estimation) ---
+  forests <- list()
+  fold_list <- list()
 
-    for (r in seq_len(honesty.splits)) {
-      # Random fold assignment
+  # Override honesty.splits if fold_assignments provided
+  if (!is.null(fold_assignments)) {
+    honesty.splits <- length(fold_assignments)
+  }
+
+  for (r in seq_len(honesty.splits)) {
+    # Fold assignment: use provided or generate random
+    if (!is.null(fold_assignments)) {
+      fold <- fold_assignments[[r]]
+    } else {
       fold_seed <- if (!is.null(seed)) seed * 13L + r * 1000L else sample.int(.Machine$integer.max, 1)
       set.seed(fold_seed)
       fold <- sample(rep(1:2, length.out = n))
-      fold_list[[r]] <- fold
-
-      idxA <- which(fold == 1)
-      idxB <- which(fold == 2)
-
-      # Forest A: build on fold A
-      datA <- X[idxA, , drop = FALSE]
-      if (outcome_type == "continuous") {
-        datA$y <- Y[idxA]
-      } else {
-        datA$y <- factor(Y[idxA], levels = c(0, 1))
-      }
-      seedA <- if (!is.null(seed)) seed + r * 100L + 1L else NULL
-      rfA <- do.call(inf.ranger::ranger, build_ranger_args(datA, seedA))
-
-      # Forest B: build on fold B
-      datB <- X[idxB, , drop = FALSE]
-      if (outcome_type == "continuous") {
-        datB$y <- Y[idxB]
-      } else {
-        datB$y <- factor(Y[idxB], levels = c(0, 1))
-      }
-      seedB <- if (!is.null(seed)) seed + r * 100L + 2L else NULL
-      rfB <- do.call(inf.ranger::ranger, build_ranger_args(datB, seedB))
-
-      forests[[r]] <- list(
-        rfA = rfA, rfB = rfB,
-        idxA = idxA, idxB = idxB,
-        fold = fold
-      )
     }
-  } else {
-    # Standard (non-honest) forest — single fit
-    dat_full <- X
+    fold_list[[r]] <- fold
+
+    idxA <- which(fold == 1)
+    idxB <- which(fold == 2)
+
+    # Forest A: build on fold A
+    datA <- X[idxA, , drop = FALSE]
     if (outcome_type == "continuous") {
-      dat_full$y <- Y
+      datA$y <- Y[idxA]
     } else {
-      dat_full$y <- factor(Y, levels = c(0, 1))
+      datA$y <- factor(Y[idxA], levels = c(0, 1))
     }
-    rf_full <- do.call(inf.ranger::ranger, build_ranger_args(dat_full, seed))
-    forests <- list(list(rf = rf_full))
-    fold_list <- NULL
+    seedA <- if (!is.null(seed)) seed + r * 100L + 1L else NULL
+    rfA <- do.call(inf.ranger::ranger, build_ranger_args(datA, seedA))
+
+    # Forest B: build on fold B
+    datB <- X[idxB, , drop = FALSE]
+    if (outcome_type == "continuous") {
+      datB$y <- Y[idxB]
+    } else {
+      datB$y <- factor(Y[idxB], levels = c(0, 1))
+    }
+    seedB <- if (!is.null(seed)) seed + r * 100L + 2L else NULL
+    rfB <- do.call(inf.ranger::ranger, build_ranger_args(datB, seedB))
+
+    forests[[r]] <- list(
+      rfA = rfA, rfB = rfB,
+      idxA = idxA, idxB = idxB,
+      fold = fold
+    )
   }
 
   # --- Build return object ---
@@ -188,8 +182,7 @@ infForest <- function(formula,
     Y = Y,
     fold_assignments = fold_list,
     outcome_type = outcome_type,
-    honesty = honesty,
-    honesty.splits = if (honesty) honesty.splits else 0L,
+    honesty.splits = honesty.splits,
     call = cl,
     params = list(
       num.trees = num.trees,
@@ -221,10 +214,8 @@ print.infForest <- function(x, ...) {
   cat("  Trees per forest:", x$params$num.trees, "\n")
   cat("  mtry:            ", x$params$mtry, "\n")
   cat("  min.node.size:   ", x$params$min.node.size, "\n")
-  cat("  Honest:          ", x$honesty, "\n")
-  if (x$honesty) {
-    cat("  Honesty splits:  ", x$honesty.splits, "\n")
-  }
+  cat("  Honest:           yes\n")
+  cat("  Honesty splits:  ", x$honesty.splits, "\n")
   cat("  Penalized splits:", x$params$penalize, "\n")
   cat("  Softmax splits:  ", x$params$softmax, "\n")
   invisible(x)

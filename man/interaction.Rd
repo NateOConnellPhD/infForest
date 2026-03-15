@@ -17,6 +17,7 @@ interaction(object, ...)
   bw = 20L,
   q_lo = 0.1,
   q_hi = 0.9,
+  subset = NULL,
   ...
 )
 }
@@ -43,6 +44,10 @@ A list of 2-element numeric vectors, each defining a quantile range
 \item{bw}{Bandwidth for continuous focal variable estimation. Default 20.}
 
 \item{q_lo, q_hi}{Grid bounds for the focal variable. Default 0.10 and 0.90.}
+
+\item{subset}{Optional integer vector of observation indices to restrict
+estimation to. Intersected with the by-variable subgroups. Useful for
+higher-order interactions: \code{int(fit, "x2", by = "x6", subset = which(dat$x7 == 1))}.}
 }
 \value{
 A list of class \code{infForest_interaction} containing:
@@ -64,6 +69,7 @@ and continuous x continuous interactions.
 fit <- infForest(y ~ ., data = dat)
 int(fit, "x1", by = "x2")
 int(fit, "x1", by = "x3", by_at = list(c(0.10, 0.33), c(0.33, 0.67), c(0.67, 0.90)))
+int(fit, "x2", by = "x6", subset = which(dat$x7 == 1))
 }
 
 }

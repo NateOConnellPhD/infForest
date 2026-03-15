@@ -55,7 +55,7 @@ interaction.infForest <- function(object, var, by,
   check_infForest(object)
   check_varname(object, var)
   check_varname(object, by)
-  if (!object$honesty) stop("Interaction estimation requires honesty = TRUE.")
+
   type <- match.arg(type)
 
   by_var <- object$X[[by]]
@@ -99,11 +99,11 @@ int <- function(...) interaction(...)
 
   # Compute effect within each by-group
   eff_1 <- .effect_within_subset(object, var, subset_idx = idx_1,
-                                 at = at, type = type, bw = bw,
-                                 q_lo = q_lo, q_hi = q_hi)
+                                  at = at, type = type, bw = bw,
+                                  q_lo = q_lo, q_hi = q_hi)
   eff_0 <- .effect_within_subset(object, var, subset_idx = idx_0,
-                                 at = at, type = type, bw = bw,
-                                 q_lo = q_lo, q_hi = q_hi)
+                                  at = at, type = type, bw = bw,
+                                  q_lo = q_lo, q_hi = q_hi)
 
   # Build subgroups table
   subgroups <- data.frame(
@@ -164,8 +164,8 @@ int <- function(...) interaction(...)
 
     group_labels[g] <- paste0(by, " in [Q", round(band[1]*100), ", Q", round(band[2]*100), "]")
     group_estimates[g] <- .effect_within_subset(object, var, subset_idx = idx_g,
-                                                at = at, type = type, bw = bw,
-                                                q_lo = q_lo, q_hi = q_hi)
+                                                 at = at, type = type, bw = bw,
+                                                 q_lo = q_lo, q_hi = q_hi)
   }
 
   subgroups <- data.frame(
@@ -207,7 +207,7 @@ int <- function(...) interaction(...)
 
 #' @keywords internal
 .effect_within_subset <- function(object, var, subset_idx, at, type,
-                                  bw, q_lo, q_hi) {
+                                   bw, q_lo, q_hi) {
   # Compute effect of var using only observations in subset_idx for
   # honest estimation (conditioning on the by-variable)
 
@@ -246,11 +246,11 @@ int <- function(...) interaction(...)
     grid <- seq(grid_lo, grid_hi, length.out = n_intervals + 1)
 
     slopes_AB <- .extract_curve_slopes(fs$rfA, object$X, object$Y,
-                                       honest_idx = hon_AB, var = var,
-                                       grid = grid)
+                                        honest_idx = hon_AB, var = var,
+                                        grid = grid)
     slopes_BA <- .extract_curve_slopes(fs$rfB, object$X, object$Y,
-                                       honest_idx = hon_BA, var = var,
-                                       grid = grid)
+                                        honest_idx = hon_BA, var = var,
+                                        grid = grid)
     avg_slopes <- (slopes_AB + slopes_BA) / 2
     intervals <- diff(grid)
     curve_vals <- c(0, cumsum(avg_slopes * intervals))
@@ -275,9 +275,9 @@ int <- function(...) interaction(...)
     hon_BA <- intersect(fs$idxA, subset_idx)
 
     est_AB <- .extract_binary_one_direction(fs$rfA, object$X, object$Y,
-                                            honest_idx = hon_AB, var = var)
+                                             honest_idx = hon_AB, var = var)
     est_BA <- .extract_binary_one_direction(fs$rfB, object$X, object$Y,
-                                            honest_idx = hon_BA, var = var)
+                                             honest_idx = hon_BA, var = var)
     all_estimates[r] <- (est_AB + est_BA) / 2
   }
 

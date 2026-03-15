@@ -12,14 +12,14 @@ infForest(
   min.node.size = 10L,
   sample.fraction = 1,
   replace = FALSE,
-  honesty = TRUE,
   honesty.splits = 5L,
   penalize = TRUE,
   softmax = FALSE,
   probability = NULL,
   num.threads = 1L,
   seed = NULL,
-  verbose = FALSE
+  verbose = FALSE,
+  fold_assignments = NULL
 )
 }
 \arguments{
@@ -36,14 +36,7 @@ infForest(
 \item{sample.fraction}{Fraction of observations per tree. Default 1.0
 (full sample).}
 
-\item{replace}{Logical; sample with replacement? Default \code{FALSE}.
-Bootstrap resampling (\code{TRUE}) reduces effective sample size per tree
-to ~63\% of the training fold, which compounds with the honesty split to
-yield ~0.63 * n/2 unique observations per tree. Subsampling without
-replacement (\code{FALSE}) uses the full training fold.}
-
-\item{honesty}{Logical; use honest cross-fitting? Default \code{TRUE}.
-When \code{TRUE}, data are split into build and estimation folds.}
+\item{replace}{Logical; sample with replacement? Default \code{FALSE}.}
 
 \item{honesty.splits}{Number of independent fold assignments to average
 over. Default 5. Higher values reduce fold-assignment variance.}
@@ -65,6 +58,12 @@ levels.}
 \item{seed}{Random seed for reproducibility. Default \code{NULL}.}
 
 \item{verbose}{Logical; print progress? Default \code{FALSE}.}
+
+\item{fold_assignments}{Optional list of fold assignment vectors. If
+provided, these are used instead of generating random fold assignments.
+Each element is an integer vector of length n with values 1 or 2.
+Length of the list determines \code{honesty.splits}. Used internally
+by PASR to ensure paired forests share the same fold assignments.}
 }
 \value{
 An object of class \code{infForest} containing:

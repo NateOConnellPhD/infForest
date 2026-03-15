@@ -42,7 +42,7 @@ effect_curve.infForest <- function(object, var, q_lo = 0.10, q_hi = 0.90,
 
   check_infForest(object)
   check_varname(object, var)
-  if (!object$honesty) stop("Effect curve estimation requires honesty = TRUE.")
+
 
   x_var <- object$X[[var]]
   if (detect_var_type(x_var) != "continuous") {

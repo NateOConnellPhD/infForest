@@ -131,34 +131,40 @@ List honest_all(
                 }
             }
 
-            // Compute contrasts
+            // Compute contrasts and region sizes
             std::unordered_map<int, double> c1_c, c2_c;
+            std::unordered_map<int, int> c1_n, c2_n;
             for (auto& kv : c1_sums) {
                 auto& s = kv.second;
-                if (s.n1 > 0 && s.n0 > 0)
+                if (s.n1 > 0 && s.n0 > 0) {
                     c1_c[kv.first] = s.s1 / s.n1 - s.s0 / s.n0;
+                    c1_n[kv.first] = s.n1 + s.n0;
+                }
             }
             for (auto& kv : c2_sums) {
                 auto& s = kv.second;
-                if (s.n1 > 0 && s.n0 > 0)
+                if (s.n1 > 0 && s.n0 > 0) {
                     c2_c[kv.first] = s.s1 / s.n1 - s.s0 / s.n0;
+                    c2_n[kv.first] = s.n1 + s.n0;
+                }
             }
 
-            // Assign to obs
+            // Assign to obs — weighted by region size
             for (int i = 0; i < n; i++) {
                 int anc = x6_anc[leaf_id[i]];
                 bool found = false;
                 double contrast = 0.0;
+                int n_region = 0;
                 if (anc >= 0) {
                     auto it = c1_c.find(anc);
-                    if (it != c1_c.end()) { contrast = it->second; found = true; }
+                    if (it != c1_c.end()) { contrast = it->second; n_region = c1_n[anc]; found = true; }
                 } else {
                     auto it = c2_c.find(leaf_id[i]);
-                    if (it != c2_c.end()) { contrast = it->second; found = true; }
+                    if (it != c2_c.end()) { contrast = it->second; n_region = c2_n[leaf_id[i]]; found = true; }
                 }
                 if (found) {
-                    bin_sum[v][i] += contrast;
-                    bin_cnt[v][i]++;
+                    bin_sum[v][i] += contrast * n_region;
+                    bin_cnt[v][i] += n_region;
                 }
             }
         }
@@ -218,18 +224,22 @@ List honest_all(
                 }
             }
 
-            // Compute contrasts: per-leaf slope if per_leaf_denom, raw Y diff otherwise
+            // Compute contrasts and region sizes: per-leaf slope if per_leaf_denom, raw Y diff otherwise
             std::unordered_map<int, double> c1_c, c2_c;
+            std::unordered_map<int, int> c1_n, c2_n;
             for (auto& kv : c1_sums) {
                 auto& s = kv.second;
                 if (s.nhi > 0 && s.nlo > 0) {
                     double y_diff = s.sy_hi / s.nhi - s.sy_lo / s.nlo;
                     if (per_leaf_denom) {
                         double x_gap = s.sx_hi / s.nhi - s.sx_lo / s.nlo;
-                        if (std::abs(x_gap) > 1e-10)
+                        if (std::abs(x_gap) > 1e-10) {
                             c1_c[kv.first] = y_diff / x_gap;
+                            c1_n[kv.first] = s.nhi + s.nlo;
+                        }
                     } else {
                         c1_c[kv.first] = y_diff;
+                        c1_n[kv.first] = s.nhi + s.nlo;
                     }
                 }
             }
@@ -239,29 +249,33 @@ List honest_all(
                     double y_diff = s.sy_hi / s.nhi - s.sy_lo / s.nlo;
                     if (per_leaf_denom) {
                         double x_gap = s.sx_hi / s.nhi - s.sx_lo / s.nlo;
-                        if (std::abs(x_gap) > 1e-10)
+                        if (std::abs(x_gap) > 1e-10) {
                             c2_c[kv.first] = y_diff / x_gap;
+                            c2_n[kv.first] = s.nhi + s.nlo;
+                        }
                     } else {
                         c2_c[kv.first] = y_diff;
+                        c2_n[kv.first] = s.nhi + s.nlo;
                     }
                 }
             }
 
-            // Assign to obs
+            // Assign to obs — weighted by region size
             for (int i = 0; i < n; i++) {
                 int anc = xk_anc[leaf_id[i]];
                 bool found = false;
                 double contrast = 0.0;
+                int n_region = 0;
                 if (anc >= 0) {
                     auto it = c1_c.find(anc);
-                    if (it != c1_c.end()) { contrast = it->second; found = true; }
+                    if (it != c1_c.end()) { contrast = it->second; n_region = c1_n[anc]; found = true; }
                 } else {
                     auto it = c2_c.find(leaf_id[i]);
-                    if (it != c2_c.end()) { contrast = it->second; found = true; }
+                    if (it != c2_c.end()) { contrast = it->second; n_region = c2_n[leaf_id[i]]; found = true; }
                 }
                 if (found) {
-                    cont_sum[m][i] += contrast;
-                    cont_cnt[m][i]++;
+                    cont_sum[m][i] += contrast * n_region;
+                    cont_cnt[m][i] += n_region;
                 }
             }
         }
@@ -424,25 +438,29 @@ List honest_curve(
                 else            { s.sy_lo += yi; s.sx_lo += xi; s.nlo++; }
             }
 
-            // Compute per-region slopes
+            // Compute per-region slopes and sizes
             std::unordered_map<int, double> region_slopes;
+            std::unordered_map<int, int> region_sizes;
             for (auto& kv : region_sums) {
                 auto& s = kv.second;
                 if (s.nhi > 0 && s.nlo > 0) {
                     double x_gap = s.sx_hi / s.nhi - s.sx_lo / s.nlo;
-                    if (std::abs(x_gap) > 1e-10)
+                    if (std::abs(x_gap) > 1e-10) {
                         region_slopes[kv.first] = (s.sy_hi / s.nhi - s.sy_lo / s.nlo) / x_gap;
+                        region_sizes[kv.first] = s.nhi + s.nlo;
+                    }
                 }
             }
 
-            // Assign to obs
+            // Assign to obs — weighted by region size
             for (int i = 0; i < n; i++) {
                 int anc = xj_anc[leaf_id[i]];
                 int region_key = (anc >= 0) ? anc : -(leaf_id[i] + 1);
                 auto it = region_slopes.find(region_key);
                 if (it != region_slopes.end()) {
-                    slope_sum[g][i] += it->second;
-                    slope_cnt[g][i]++;
+                    int n_region = region_sizes[region_key];
+                    slope_sum[g][i] += it->second * n_region;
+                    slope_cnt[g][i] += n_region;
                 }
             }
         }
@@ -529,7 +547,6 @@ List honest_interaction_2x2(
         const double* sval = all_sval[b].data();
         const int* lc = all_lc[b].data();
         const int* rc = all_rc[b].data();
-        int n_nodes = (int)all_sv[b].size();
 
         // Walk all obs to leaves
         std::vector<int> leaf_id(n);
@@ -580,6 +597,7 @@ List honest_interaction_2x2(
         //   = mean(x2 | x2 >= thresh, in leaf) - mean(x2 | x2 < thresh, in leaf)
         //   pooled across both x6 groups
         std::unordered_map<int, double> leaf_int;
+        std::unordered_map<int, int> leaf_int_n;
         for (auto& kv : leaf_cells) {
             auto& c = kv.second;
             if (c.n11 > 0 && c.n10 > 0 && c.n01 > 0 && c.n00 > 0) {
@@ -594,16 +612,18 @@ List honest_interaction_2x2(
                 double x_gap = sx_hi_total / n_hi_total - sx_lo_total / n_lo_total;
                 if (std::abs(x_gap) > 1e-10) {
                     leaf_int[kv.first] = raw_int / x_gap;
+                    leaf_int_n[kv.first] = c.n11 + c.n10 + c.n01 + c.n00;
                 }
             }
         }
 
-        // Assign to obs
+        // Assign to obs — weighted by region size
         for (int i = 0; i < n; i++) {
             auto it = leaf_int.find(leaf_id[i]);
             if (it != leaf_int.end()) {
-                obs_sum[i] += it->second;
-                obs_cnt[i]++;
+                int n_region = leaf_int_n[leaf_id[i]];
+                obs_sum[i] += it->second * n_region;
+                obs_cnt[i] += n_region;
             }
         }
     }
@@ -767,22 +787,26 @@ List honest_predict_contrast(
                 }
             }
 
-            // Case 2 contrasts: per-leaf slope × nominal span
+            // Case 2 contrasts and sizes: per-leaf slope × nominal span
             std::unordered_map<int, double> c2_contrasts;
+            std::unordered_map<int, int> c2_n;
             for (auto& kv : c2_sums) {
                 auto& s = kv.second;
                 if (s.nhi > 0 && s.nlo > 0) {
                     double x_gap = s.sx_hi / s.nhi - s.sx_lo / s.nlo;
-                    if (std::abs(x_gap) > 1e-10)
+                    if (std::abs(x_gap) > 1e-10) {
                         c2_contrasts[kv.first] = (s.sy_hi / s.nhi - s.sy_lo / s.nlo) / x_gap * span;
+                        c2_n[kv.first] = s.nhi + s.nlo;
+                    }
                 }
             }
 
-            // --- Assign contrasts to obs ---
+            // --- Assign contrasts to obs — weighted by region size ---
             for (int i = 0; i < n; i++) {
                 int anc = xj_anc[leaf_id[i]];
                 bool found = false;
                 double contrast = 0.0;
+                int n_region = 0;
 
                 if (anc >= 0) {
                     // Case 1: tree split on X_j. Route counterfactuals.
@@ -801,6 +825,11 @@ List honest_predict_contrast(
                         auto it_b = leaf_mean.find(node_b);
                         if (it_a != leaf_mean.end() && it_b != leaf_mean.end()) {
                             contrast = it_a->second - it_b->second;
+                            // Region size = observations in both counterfactual leaves
+                            auto it_na = leaf_cnt.find(node_a);
+                            auto it_nb = leaf_cnt.find(node_b);
+                            n_region = (it_na != leaf_cnt.end() ? it_na->second : 1) +
+                                       (it_nb != leaf_cnt.end() ? it_nb->second : 1);
                             found = true;
                         }
                     }
@@ -810,13 +839,14 @@ List honest_predict_contrast(
                     auto it = c2_contrasts.find(leaf_id[i]);
                     if (it != c2_contrasts.end()) {
                         contrast = it->second;
+                        n_region = c2_n[leaf_id[i]];
                         found = true;
                     }
                 }
 
                 if (found) {
-                    cont_sum[m][i] += contrast;
-                    cont_cnt[m][i]++;
+                    cont_sum[m][i] += contrast * n_region;
+                    cont_cnt[m][i] += n_region;
                 }
             }
         }

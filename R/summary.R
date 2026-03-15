@@ -42,7 +42,7 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
                               bw = 20L, q_lo = 0.10, q_hi = 0.90, ...) {
 
   check_infForest(object)
-  if (!object$honesty) stop("Summary requires honesty = TRUE.")
+
 
   if (is.null(vars)) {
     cat("Inference Forest Summary\n")
@@ -356,7 +356,7 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
     at <- as.numeric(strsplit(inside, ",")[[1]])
     if (any(is.na(at))) {
       stop(paste0("Could not parse values in '", term,
-                  "'. Use numeric values separated by commas."))
+                   "'. Use numeric values separated by commas."))
     }
     list(var = var, at = at)
   } else {
