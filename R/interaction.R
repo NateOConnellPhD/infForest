@@ -18,6 +18,9 @@
 #'   \code{by}. Default: \code{list(c(0.10, 0.25), c(0.75, 0.90))}.
 #' @param bw Bandwidth for continuous focal variable estimation. Default 20.
 #' @param q_lo,q_hi Grid bounds for the focal variable. Default 0.10 and 0.90.
+#' @param subset Optional integer vector of observation indices to restrict
+#'   estimation to. Intersected with the by-variable subgroups. Useful for
+#'   higher-order interactions: \code{int(fit, "x2", by = "x6", subset = which(dat$x7 == 1))}.
 #' @param ... Additional arguments (currently unused).
 #'
 #' @return A list of class \code{infForest_interaction} containing:
@@ -33,6 +36,7 @@
 #' fit <- infForest(y ~ ., data = dat)
 #' int(fit, "x1", by = "x2")
 #' int(fit, "x1", by = "x3", by_at = list(c(0.10, 0.33), c(0.33, 0.67), c(0.67, 0.90)))
+#' int(fit, "x2", by = "x6", subset = which(dat$x7 == 1))
 #' }
 #'
 #' @export
@@ -45,7 +49,8 @@ interaction.infForest <- function(object, var, by,
                                   type = c("quantile", "value"),
                                   by_at = list(c(0.10, 0.25), c(0.75, 0.90)),
                                   bw = 20L,
-                                  q_lo = 0.10, q_hi = 0.90, ...) {
+                                  q_lo = 0.10, q_hi = 0.90,
+                                  subset = NULL, ...) {
 
   check_infForest(object)
   check_varname(object, var)
@@ -58,11 +63,13 @@ interaction.infForest <- function(object, var, by,
 
   if (by_type == "binary") {
     result <- .interaction_by_binary(object, var, by, at = at, type = type,
-                                     bw = bw, q_lo = q_lo, q_hi = q_hi)
+                                     bw = bw, q_lo = q_lo, q_hi = q_hi,
+                                     subset = subset)
   } else if (by_type == "continuous") {
     result <- .interaction_by_continuous(object, var, by, at = at, type = type,
                                          by_at = by_at, bw = bw,
-                                         q_lo = q_lo, q_hi = q_hi)
+                                         q_lo = q_lo, q_hi = q_hi,
+                                         subset = subset)
   } else {
     stop("Categorical by-variables with >2 levels not yet supported.")
   }
@@ -75,11 +82,18 @@ int <- function(...) interaction(...)
 
 
 #' @keywords internal
-.interaction_by_binary <- function(object, var, by, at, type, bw, q_lo, q_hi) {
+.interaction_by_binary <- function(object, var, by, at, type, bw, q_lo, q_hi,
+                                   subset = NULL) {
 
   by_var <- object$X[[by]]
   idx_1 <- which(by_var == 1)
   idx_0 <- which(by_var == 0)
+
+  # Intersect with external subset if provided
+  if (!is.null(subset)) {
+    idx_1 <- intersect(idx_1, subset)
+    idx_0 <- intersect(idx_0, subset)
+  }
 
   focal_type <- detect_var_type(object$X[[var]])
 
@@ -121,7 +135,7 @@ int <- function(...) interaction(...)
 
 #' @keywords internal
 .interaction_by_continuous <- function(object, var, by, at, type, by_at,
-                                       bw, q_lo, q_hi) {
+                                       bw, q_lo, q_hi, subset = NULL) {
 
   by_var <- object$X[[by]]
   focal_type <- detect_var_type(object$X[[var]])
@@ -136,6 +150,11 @@ int <- function(...) interaction(...)
     q_band_lo <- unname(quantile(by_var, band[1]))
     q_band_hi <- unname(quantile(by_var, band[2]))
     idx_g <- which(by_var >= q_band_lo & by_var <= q_band_hi)
+
+    # Intersect with external subset if provided
+    if (!is.null(subset)) {
+      idx_g <- intersect(idx_g, subset)
+    }
 
     if (length(idx_g) < 10) {
       warning(paste0("Subgroup ", by, " in [Q", round(band[1]*100), ", Q",
