@@ -289,16 +289,18 @@ List honest_all(
         List om_list(nv);
         for (int v = 0; v < nv; v++) {
             NumericVector om(n);
-            double total = 0.0; int nc = 0;
+            double total_wsum = 0.0;
+            double total_wcnt = 0.0;
             for (int i = 0; i < n; i++) {
                 if (counts[v][i] > 0) {
                     om[i] = sums[v][i] / counts[v][i];
-                    total += om[i]; nc++;
+                    total_wsum += sums[v][i];
+                    total_wcnt += counts[v][i];
                 } else {
                     om[i] = NA_REAL;
                 }
             }
-            pa[v] = (nc > 0) ? total / nc : NA_REAL;
+            pa[v] = (total_wcnt > 0) ? total_wsum / total_wcnt : NA_REAL;
             om_list[v] = om;
         }
         return List::create(Named("popavg") = pa, Named("obs_mean") = om_list);
@@ -471,16 +473,18 @@ List honest_curve(
     List om_list(G);
     for (int g = 0; g < G; g++) {
         NumericVector om(n);
-        double total = 0.0; int nc = 0;
+        double total_wsum = 0.0;
+        double total_wcnt = 0.0;
         for (int i = 0; i < n; i++) {
             if (slope_cnt[g][i] > 0) {
                 om[i] = slope_sum[g][i] / slope_cnt[g][i];
-                total += om[i]; nc++;
+                total_wsum += slope_sum[g][i];
+                total_wcnt += slope_cnt[g][i];
             } else {
                 om[i] = NA_REAL;
             }
         }
-        pa[g] = (nc > 0) ? total / nc : NA_REAL;
+        pa[g] = (total_wcnt > 0) ? total_wsum / total_wcnt : NA_REAL;
         om_list[g] = om;
     }
 
@@ -630,16 +634,18 @@ List honest_interaction_2x2(
 
     // Output
     NumericVector obs_mean(n);
-    double total = 0.0; int nc = 0;
+    double total_wsum = 0.0;
+    double total_wcnt = 0.0;
     for (int i = 0; i < n; i++) {
         if (obs_cnt[i] > 0) {
             obs_mean[i] = obs_sum[i] / obs_cnt[i];
-            total += obs_mean[i]; nc++;
+            total_wsum += obs_sum[i];
+            total_wcnt += obs_cnt[i];
         } else {
             obs_mean[i] = NA_REAL;
         }
     }
-    double popavg = (nc > 0) ? total / nc : NA_REAL;
+    double popavg = (total_wcnt > 0) ? total_wsum / total_wcnt : NA_REAL;
 
     return List::create(
         Named("popavg") = popavg,
@@ -857,16 +863,18 @@ List honest_predict_contrast(
     List om_list(n_cont);
     for (int m = 0; m < n_cont; m++) {
         NumericVector om(n);
-        double total = 0.0; int nc = 0;
+        double total_wsum = 0.0;
+        double total_wcnt = 0.0;
         for (int i = 0; i < n; i++) {
             if (cont_cnt[m][i] > 0) {
                 om[i] = cont_sum[m][i] / cont_cnt[m][i];
-                total += om[i]; nc++;
+                total_wsum += cont_sum[m][i];
+                total_wcnt += cont_cnt[m][i];
             } else {
                 om[i] = NA_REAL;
             }
         }
-        pa[m] = (nc > 0) ? total / nc : NA_REAL;
+        pa[m] = (total_wcnt > 0) ? total_wsum / total_wcnt : NA_REAL;
         om_list[m] = om;
     }
 
