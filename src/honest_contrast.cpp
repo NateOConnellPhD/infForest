@@ -28,9 +28,9 @@ List honest_all(
     IntegerVector cont_cols,
     NumericVector cont_thresh,
     bool per_leaf_denom = true,
-    Nullable<NumericMatrix> bin_fhat_ref_0 = R_NilValue,
-    Nullable<NumericMatrix> bin_fhat_ref_1 = R_NilValue,
-    Nullable<NumericMatrix> cont_fhat_ref = R_NilValue
+    SEXP bin_fhat_ref_0 = R_NilValue,
+    SEXP bin_fhat_ref_1 = R_NilValue,
+    SEXP cont_fhat_ref = R_NilValue
 ) {
     List svl = forest["split.varIDs"];
     List svall = forest["split.values"];
@@ -48,11 +48,8 @@ List honest_all(
         is_honest[honest_idx[j] - 1] = true;
 
     // Augmentation vectors (precomputed forest-wide predictions)
-    // bin_fhat_ref_0: n x n_bin matrix, predict(forest, X with X_j=0)
-    // bin_fhat_ref_1: n x n_bin matrix, predict(forest, X with X_j=1)
-    // cont_fhat_ref:  n x n_cont matrix, predict(forest, X with X_k=midpoint)
-    bool have_bin_aug = bin_fhat_ref_0.isNotNull() && bin_fhat_ref_1.isNotNull();
-    bool have_cont_aug = cont_fhat_ref.isNotNull();
+    bool have_bin_aug = (bin_fhat_ref_0 != R_NilValue) && (bin_fhat_ref_1 != R_NilValue);
+    bool have_cont_aug = (cont_fhat_ref != R_NilValue);
     NumericMatrix bfr0, bfr1, cfr;
     const double *bfr0_ptr = nullptr, *bfr1_ptr = nullptr, *cfr_ptr = nullptr;
     if (have_bin_aug) {
@@ -372,7 +369,7 @@ List honest_curve(
     NumericVector midpoints,
     NumericVector window_lo,
     NumericVector window_hi,
-    Nullable<NumericVector> fhat_ref_vec = R_NilValue
+    SEXP fhat_ref_vec = R_NilValue
 ) {
     List svl = forest["split.varIDs"];
     List svall = forest["split.values"];
@@ -388,7 +385,7 @@ List honest_curve(
     for (int j = 0; j < honest_idx.size(); j++)
         is_honest[honest_idx[j] - 1] = true;
 
-    bool have_aug = fhat_ref_vec.isNotNull();
+    bool have_aug = (fhat_ref_vec != R_NilValue);
     NumericVector fhat_ref_nv;
     const double* fr_ptr = nullptr;
     if (have_aug) {

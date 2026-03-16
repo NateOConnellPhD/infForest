@@ -11,7 +11,7 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // honest_all
-List honest_all(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, IntegerVector bin_cols, IntegerVector cont_cols, NumericVector cont_thresh, bool per_leaf_denom, Nullable<NumericMatrix> bin_fhat_ref_0, Nullable<NumericMatrix> bin_fhat_ref_1, Nullable<NumericMatrix> cont_fhat_ref);
+List honest_all(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, IntegerVector bin_cols, IntegerVector cont_cols, NumericVector cont_thresh, bool per_leaf_denom, SEXP bin_fhat_ref_0, SEXP bin_fhat_ref_1, SEXP cont_fhat_ref);
 RcppExport SEXP _infForest_honest_all(SEXP forestSEXP, SEXP X_numSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP bin_colsSEXP, SEXP cont_colsSEXP, SEXP cont_threshSEXP, SEXP per_leaf_denomSEXP, SEXP bin_fhat_ref_0SEXP, SEXP bin_fhat_ref_1SEXP, SEXP cont_fhat_refSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
@@ -24,15 +24,15 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< IntegerVector >::type cont_cols(cont_colsSEXP);
     Rcpp::traits::input_parameter< NumericVector >::type cont_thresh(cont_threshSEXP);
     Rcpp::traits::input_parameter< bool >::type per_leaf_denom(per_leaf_denomSEXP);
-    Rcpp::traits::input_parameter< Nullable<NumericMatrix> >::type bin_fhat_ref_0(bin_fhat_ref_0SEXP);
-    Rcpp::traits::input_parameter< Nullable<NumericMatrix> >::type bin_fhat_ref_1(bin_fhat_ref_1SEXP);
-    Rcpp::traits::input_parameter< Nullable<NumericMatrix> >::type cont_fhat_ref(cont_fhat_refSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type bin_fhat_ref_0(bin_fhat_ref_0SEXP);
+    Rcpp::traits::input_parameter< SEXP >::type bin_fhat_ref_1(bin_fhat_ref_1SEXP);
+    Rcpp::traits::input_parameter< SEXP >::type cont_fhat_ref(cont_fhat_refSEXP);
     rcpp_result_gen = Rcpp::wrap(honest_all(forest, X_num, y_honest, honest_idx, bin_cols, cont_cols, cont_thresh, per_leaf_denom, bin_fhat_ref_0, bin_fhat_ref_1, cont_fhat_ref));
     return rcpp_result_gen;
 END_RCPP
 }
 // honest_curve
-List honest_curve(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, int col, NumericVector midpoints, NumericVector window_lo, NumericVector window_hi, Nullable<NumericVector> fhat_ref_vec);
+List honest_curve(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, int col, NumericVector midpoints, NumericVector window_lo, NumericVector window_hi, SEXP fhat_ref_vec);
 RcppExport SEXP _infForest_honest_curve(SEXP forestSEXP, SEXP X_numSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP colSEXP, SEXP midpointsSEXP, SEXP window_loSEXP, SEXP window_hiSEXP, SEXP fhat_ref_vecSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
@@ -45,7 +45,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< NumericVector >::type midpoints(midpointsSEXP);
     Rcpp::traits::input_parameter< NumericVector >::type window_lo(window_loSEXP);
     Rcpp::traits::input_parameter< NumericVector >::type window_hi(window_hiSEXP);
-    Rcpp::traits::input_parameter< Nullable<NumericVector> >::type fhat_ref_vec(fhat_ref_vecSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type fhat_ref_vec(fhat_ref_vecSEXP);
     rcpp_result_gen = Rcpp::wrap(honest_curve(forest, X_num, y_honest, honest_idx, col, midpoints, window_lo, window_hi, fhat_ref_vec));
     return rcpp_result_gen;
 END_RCPP
