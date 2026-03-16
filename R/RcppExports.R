@@ -13,7 +13,3 @@ honest_interaction_2x2 <- function(forest, X_num, y_honest, honest_idx, bin_col,
     .Call(`_infForest_honest_interaction_2x2`, forest, X_num, y_honest, honest_idx, bin_col, cont_col, cont_thresh)
 }
 
-honest_predict_contrast <- function(forest, X_num, y_honest, honest_idx, cont_cols, cont_va, cont_vb) {
-    .Call(`_infForest_honest_predict_contrast`, forest, X_num, y_honest, honest_idx, cont_cols, cont_va, cont_vb)
-}
-

@@ -63,29 +63,11 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// honest_predict_contrast
-List honest_predict_contrast(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, IntegerVector cont_cols, NumericVector cont_va, NumericVector cont_vb);
-RcppExport SEXP _infForest_honest_predict_contrast(SEXP forestSEXP, SEXP X_numSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP cont_colsSEXP, SEXP cont_vaSEXP, SEXP cont_vbSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< List >::type forest(forestSEXP);
-    Rcpp::traits::input_parameter< NumericMatrix >::type X_num(X_numSEXP);
-    Rcpp::traits::input_parameter< NumericVector >::type y_honest(y_honestSEXP);
-    Rcpp::traits::input_parameter< IntegerVector >::type honest_idx(honest_idxSEXP);
-    Rcpp::traits::input_parameter< IntegerVector >::type cont_cols(cont_colsSEXP);
-    Rcpp::traits::input_parameter< NumericVector >::type cont_va(cont_vaSEXP);
-    Rcpp::traits::input_parameter< NumericVector >::type cont_vb(cont_vbSEXP);
-    rcpp_result_gen = Rcpp::wrap(honest_predict_contrast(forest, X_num, y_honest, honest_idx, cont_cols, cont_va, cont_vb));
-    return rcpp_result_gen;
-END_RCPP
-}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_infForest_honest_all", (DL_FUNC) &_infForest_honest_all, 8},
     {"_infForest_honest_curve", (DL_FUNC) &_infForest_honest_curve, 8},
     {"_infForest_honest_interaction_2x2", (DL_FUNC) &_infForest_honest_interaction_2x2, 7},
-    {"_infForest_honest_predict_contrast", (DL_FUNC) &_infForest_honest_predict_contrast, 7},
     {NULL, NULL, 0}
 };
 
