@@ -214,7 +214,6 @@ int <- function(...) interaction(...)
     return(.honest_effect_binary_subset(object, var, subset_idx))
   }
 
-  # Continuous focal variable
   x_var <- object$X[[var]]
   if (type == "quantile") {
     at_vals <- sort(unname(quantile(x_var, at)))
@@ -232,21 +231,17 @@ int <- function(...) interaction(...)
 
   for (r in seq_along(object$forests)) {
     fs <- object$forests[[r]]
-
     hon_AB <- intersect(fs$idxB, subset_idx)
     hon_BA <- intersect(fs$idxA, subset_idx)
-
-    Y_resid_AB <- .residualize_Y(object$X, object$Y, fs$idxA, hon_AB, var)
-    Y_resid_BA <- .residualize_Y(object$X, object$Y, fs$idxB, hon_BA, var)
 
     n_honest_sub <- length(hon_AB)
     n_intervals <- max(1L, as.integer(n_honest_sub / bw))
     grid <- seq(grid_lo, grid_hi, length.out = n_intervals + 1)
 
-    slopes_AB <- .extract_curve_slopes(fs$rfA, object$X, Y_resid_AB,
+    slopes_AB <- .extract_curve_slopes(fs$rfA, object$X, object$Y,
                                         honest_idx = hon_AB, var = var,
                                         grid = grid)
-    slopes_BA <- .extract_curve_slopes(fs$rfB, object$X, Y_resid_BA,
+    slopes_BA <- .extract_curve_slopes(fs$rfB, object$X, object$Y,
                                         honest_idx = hon_BA, var = var,
                                         grid = grid)
     avg_slopes <- (slopes_AB + slopes_BA) / 2
@@ -258,39 +253,7 @@ int <- function(...) interaction(...)
     all_estimates[r] <- (val_a - val_b) / (a - b)
   }
 
-  raw_slope <- mean(all_estimates)
-
-  # FWL denominator correction: average g_hat across forests
-  X_minus_j <- object$X[, setdiff(names(object$X), var), drop = FALSE]
-  g_hat_avg <- numeric(nrow(object$X))
-  n_g <- 0
-  for (r in seq_along(object$forests)) {
-    fs <- object$forests[[r]]
-    for (rf_build_idx in list(fs$idxA, fs$idxB)) {
-      dat_g <- X_minus_j[rf_build_idx, , drop = FALSE]
-      dat_g$xj <- x_var[rf_build_idx]
-      rf_g <- ranger::ranger(xj ~ ., data = dat_g, num.trees = 500,
-                              mtry = min(5L, ncol(dat_g) - 1),
-                              min.node.size = 5, seed = 43)
-      g_hat_avg <- g_hat_avg + predict(rf_g, data = X_minus_j)$predictions
-      n_g <- n_g + 1
-    }
-  }
-  g_hat_avg <- g_hat_avg / n_g
-  e_j <- x_var - g_hat_avg
-
-  x_sub <- x_var[subset_idx]
-  ej_sub <- e_j[subset_idx]
-  idx_hi <- x_sub >= a
-  idx_lo <- x_sub <= b
-  if (sum(idx_hi) > 0 && sum(idx_lo) > 0) {
-    denom_ratio <- (mean(ej_sub[idx_hi]) - mean(ej_sub[idx_lo])) / (a - b)
-    if (abs(denom_ratio) > 0.05) {
-      return(raw_slope / denom_ratio)
-    }
-  }
-
-  raw_slope
+  mean(all_estimates)
 }
 
 
@@ -300,25 +263,13 @@ int <- function(...) interaction(...)
 
   for (r in seq_along(object$forests)) {
     fs <- object$forests[[r]]
-
     hon_AB <- intersect(fs$idxB, subset_idx)
     hon_BA <- intersect(fs$idxA, subset_idx)
 
-    fwl_AB <- .residualize_FWL(object$X, object$Y, fs$idxA, hon_AB, var)
-    fwl_BA <- .residualize_FWL(object$X, object$Y, fs$idxB, hon_BA, var)
-
-    raw_AB <- .extract_binary_one_direction(fs$rfA, object$X, fwl_AB$Y_resid,
+    est_AB <- .extract_binary_one_direction(fs$rfA, object$X, object$Y,
                                              honest_idx = hon_AB, var = var)
-    raw_BA <- .extract_binary_one_direction(fs$rfB, object$X, fwl_BA$Y_resid,
+    est_BA <- .extract_binary_one_direction(fs$rfB, object$X, object$Y,
                                              honest_idx = hon_BA, var = var)
-
-    x_j <- object$X[[var]]
-    denom_AB <- mean(fwl_AB$e_j[x_j == 1]) - mean(fwl_AB$e_j[x_j == 0])
-    denom_BA <- mean(fwl_BA$e_j[x_j == 1]) - mean(fwl_BA$e_j[x_j == 0])
-
-    est_AB <- if (abs(denom_AB) > 1e-10) raw_AB / denom_AB else raw_AB
-    est_BA <- if (abs(denom_BA) > 1e-10) raw_BA / denom_BA else raw_BA
-
     all_estimates[r] <- (est_AB + est_BA) / 2
   }
 
