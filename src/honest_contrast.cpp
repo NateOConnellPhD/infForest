@@ -50,6 +50,7 @@ List honest_all(
     // Augmentation vectors (precomputed forest-wide predictions)
     bool have_bin_aug = (bin_fhat_ref_0 != R_NilValue) && (bin_fhat_ref_1 != R_NilValue);
     bool have_cont_aug = (cont_fhat_ref != R_NilValue);
+    Rcpp::Rcout << "DEBUG have_bin_aug=" << have_bin_aug << " have_cont_aug=" << have_cont_aug << std::endl;
     NumericMatrix bfr0, bfr1, cfr;
     const double *bfr0_ptr = nullptr, *bfr1_ptr = nullptr, *cfr_ptr = nullptr;
     if (have_bin_aug) {
