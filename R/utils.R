@@ -46,7 +46,6 @@ detect_var_type <- function(x) {
 
 #' @keywords internal
 get_ranger_col_idx <- function(rf, varname) {
-  # 0-based index in ranger's internal variable ordering
   vnames <- rf$forest$independent.variable.names
   idx <- match(varname, vnames)
   if (is.na(idx)) stop(paste0("Variable '", varname, "' not in forest."))
@@ -64,73 +63,7 @@ reorder_X_to_ranger <- function(X, rf) {
 .get_pred_vector <- function(rf, newdata) {
   p <- predict(rf, data = newdata)$predictions
   if (is.matrix(p)) {
-    # Probability forest: return P(Y=1) column
     return(p[, ncol(p)])
   }
   as.numeric(p)
-}
-
-#' Full nonparametric FWL with cross-fitted nuisance estimation
-#' K-fold cross-fitting ensures each obs's h_hat/g_hat didn't see that obs's Y.
-#' @keywords internal
-.residualize_FWL <- function(X, Y, build_idx, honest_idx, var, K = 5L) {
-  X_minus_j <- X[, setdiff(names(X), var), drop = FALSE]
-  n <- nrow(X)
-  x_j <- X[[var]]
-  var_type <- detect_var_type(x_j)
-
-  # Create K folds over ALL observations
-  fold_ids <- rep(seq_len(K), length.out = n)
-  set.seed(44)
-  fold_ids <- fold_ids[sample(n)]
-
-  h_hat <- numeric(n)
-  g_hat <- numeric(n)
-
-  for (k in seq_len(K)) {
-    test_k <- which(fold_ids == k)
-    train_k <- which(fold_ids != k)
-
-    # Step 1: h_hat — predict Y from X_{-j}
-    dat_h <- X_minus_j[train_k, , drop = FALSE]
-    dat_h$y <- as.numeric(Y[train_k])
-    rf_h <- ranger::ranger(y ~ ., data = dat_h, num.trees = 500,
-                            mtry = min(5L, ncol(dat_h) - 1),
-                            min.node.size = 5, seed = 42 + k)
-    h_hat[test_k] <- predict(rf_h, data = X_minus_j[test_k, , drop = FALSE])$predictions
-
-    # Step 2: g_hat — predict X_j from X_{-j}
-    if (var_type == "binary") {
-      dat_g <- X_minus_j[train_k, , drop = FALSE]
-      dat_g$xj <- factor(x_j[train_k], levels = c(0, 1))
-      rf_g <- ranger::ranger(xj ~ ., data = dat_g, num.trees = 500,
-                              probability = TRUE,
-                              mtry = min(5L, ncol(dat_g) - 1),
-                              min.node.size = 5, seed = 43 + k)
-      g_hat[test_k] <- predict(rf_g, data = X_minus_j[test_k, , drop = FALSE])$predictions[, 2]
-    } else {
-      dat_g <- X_minus_j[train_k, , drop = FALSE]
-      dat_g$xj <- x_j[train_k]
-      rf_g <- ranger::ranger(xj ~ ., data = dat_g, num.trees = 500,
-                              mtry = min(5L, ncol(dat_g) - 1),
-                              min.node.size = 5, seed = 43 + k)
-      g_hat[test_k] <- predict(rf_g, data = X_minus_j[test_k, , drop = FALSE])$predictions
-    }
-  }
-
-  # e_Y = Y - h_hat (for honest obs only)
-  Y_resid <- as.numeric(Y)
-  Y_resid[honest_idx] <- Y_resid[honest_idx] - h_hat[honest_idx]
-
-  # e_j = X_j - g_hat (for all obs)
-  e_j <- x_j - g_hat
-
-  list(Y_resid = Y_resid, e_j = e_j, g_hat = g_hat)
-}
-
-#' Simple wrapper for backward compatibility — returns just Y_resid
-#' @keywords internal
-.residualize_Y <- function(X, Y, build_idx, honest_idx, var) {
-  res <- .residualize_FWL(X, Y, build_idx, honest_idx, var)
-  res$Y_resid
 }
