@@ -93,8 +93,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   grid_hi <- max(at_vals, unname(quantile(x_var, q_hi)))
 
   curve_result <- .honest_build_curve(object, var, grid_lo, grid_hi,
-                                       n_honest = n_honest, bw = bw,
-                                       subset = subset)
+                                      n_honest = n_honest, bw = bw,
+                                      subset = subset)
 
   # Extract all pairwise contrasts (hi > lo)
   n_at <- length(at_vals)
@@ -147,9 +147,9 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     hon_B <- if (!is.null(subset)) intersect(fs$idxB, subset) else fs$idxB
     hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
     est_AB <- .extract_binary_one_direction(fs$rfA, object$X, object$Y,
-                                             honest_idx = hon_B, var = var)
+                                            honest_idx = hon_B, var = var)
     est_BA <- .extract_binary_one_direction(fs$rfB, object$X, object$Y,
-                                             honest_idx = hon_A, var = var)
+                                            honest_idx = hon_A, var = var)
     all_estimates[r] <- (est_AB + est_BA) / 2
   }
 
@@ -199,7 +199,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   X_ref0 <- X; X_ref0[[var]] <- 0
   pred_ref <- predict(rf, data = X_ref0)$predictions
 
-  # Raw contrast (no within-leaf augmentation needed — apply global correction)
+  # Raw contrast
   res <- honest_all(
     rf$forest, X_ord, y_hon, as.integer(honest_idx),
     bin_cols = as.integer(col_idx),
@@ -210,17 +210,22 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 
   raw_popavg <- res$binary$popavg[1]
 
-  # Global augmentation: subtract population-level non-X_j imbalance
-  # among honest observations only
+  # Global augmentation
   x_vals <- X[[var]][honest_idx]
   fref_vals <- pred_ref[honest_idx]
   idx1 <- x_vals > 0.5
   idx0 <- !idx1
   if (sum(idx1) > 0 && sum(idx0) > 0) {
-    global_correction <- mean(fref_vals[idx1]) - mean(fref_vals[idx0])
+    fref_mean_1 <- mean(fref_vals[idx1])
+    fref_mean_0 <- mean(fref_vals[idx0])
+    global_correction <- fref_mean_1 - fref_mean_0
   } else {
+    fref_mean_1 <- NA; fref_mean_0 <- NA
     global_correction <- 0
   }
+
+  cat(sprintf("  [augment %s] raw=%.4f fref_mean(x=1)=%.4f fref_mean(x=0)=%.4f corr=%.4f final=%.4f\n",
+              var, raw_popavg, fref_mean_1, fref_mean_0, global_correction, raw_popavg - global_correction))
 
   raw_popavg - global_correction
 }
@@ -278,9 +283,9 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   for (r in seq_along(object$forests)) {
     fs <- object$forests[[r]]
     est_AB <- .extract_binary_multi_one_direction(fs$rfA, object$X, object$Y,
-                                                   honest_idx = fs$idxB, vars = vars)
+                                                  honest_idx = fs$idxB, vars = vars)
     est_BA <- .extract_binary_multi_one_direction(fs$rfB, object$X, object$Y,
-                                                   honest_idx = fs$idxA, vars = vars)
+                                                  honest_idx = fs$idxA, vars = vars)
     all_estimates[r, ] <- (est_AB + est_BA) / 2
   }
 
