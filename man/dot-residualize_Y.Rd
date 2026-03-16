@@ -2,13 +2,11 @@
 % Please edit documentation in R/utils.R
 \name{.residualize_Y}
 \alias{.residualize_Y}
-\title{Residualize Y by fitting a leave-variable-out forest on the build fold
-Returns a Y vector where honest observations have h_hat subtracted}
+\title{Simple wrapper for backward compatibility — returns just Y_resid}
 \usage{
 .residualize_Y(X, Y, build_idx, honest_idx, var)
 }
 \description{
-Residualize Y by fitting a leave-variable-out forest on the build fold
-Returns a Y vector where honest observations have h_hat subtracted
+Simple wrapper for backward compatibility — returns just Y_resid
 }
 \keyword{internal}

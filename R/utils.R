@@ -70,25 +70,57 @@ reorder_X_to_ranger <- function(X, rf) {
   as.numeric(p)
 }
 
-#' Residualize Y by fitting a leave-variable-out forest on the build fold
-#' Returns a Y vector where honest observations have h_hat subtracted
+#' Full nonparametric FWL residualization
+#' Step 1: fit leave-X_j-out forest on (X_{-j}, Y) → h_hat → e_Y = Y - h_hat
+#' Step 2: fit leave-X_j-out forest on (X_{-j}, X_j) → g_hat → e_j = X_j - g_hat
+#' Returns list with Y_resid (e_Y for honest obs) and g_hat (for denominator correction)
 #' @keywords internal
-.residualize_Y <- function(X, Y, build_idx, honest_idx, var) {
-  # Fit leave-var-out forest on build fold
+.residualize_FWL <- function(X, Y, build_idx, honest_idx, var) {
   X_minus_j <- X[, setdiff(names(X), var), drop = FALSE]
-  dat_build <- X_minus_j[build_idx, , drop = FALSE]
-  dat_build$y <- as.numeric(Y[build_idx])
+  n <- nrow(X)
 
-  rf_minus_j <- ranger::ranger(y ~ ., data = dat_build, num.trees = 500,
-                                mtry = min(5L, ncol(dat_build) - 1),
-                                min.node.size = 5, seed = 42)
+  # Step 1: h_hat — predict Y from X_{-j}
+  dat_h <- X_minus_j[build_idx, , drop = FALSE]
+  dat_h$y <- as.numeric(Y[build_idx])
+  rf_h <- ranger::ranger(y ~ ., data = dat_h, num.trees = 500,
+                          mtry = min(5L, ncol(dat_h) - 1),
+                          min.node.size = 5, seed = 42)
+  h_hat <- predict(rf_h, data = X_minus_j)$predictions
 
-  # Predict at ALL observations' X_{-j} values
-  h_hat <- predict(rf_minus_j, data = X_minus_j)$predictions
+  # Step 2: g_hat — predict X_j from X_{-j}
+  x_j <- X[[var]]
+  var_type <- detect_var_type(x_j)
 
-  # Residualize: Y_resid = Y - h_hat for honest obs
+  if (var_type == "binary") {
+    dat_g <- X_minus_j[build_idx, , drop = FALSE]
+    dat_g$xj <- factor(x_j[build_idx], levels = c(0, 1))
+    rf_g <- ranger::ranger(xj ~ ., data = dat_g, num.trees = 500,
+                            probability = TRUE,
+                            mtry = min(5L, ncol(dat_g) - 1),
+                            min.node.size = 5, seed = 43)
+    g_hat <- predict(rf_g, data = X_minus_j)$predictions[, 2]  # P(X_j=1)
+  } else {
+    dat_g <- X_minus_j[build_idx, , drop = FALSE]
+    dat_g$xj <- x_j[build_idx]
+    rf_g <- ranger::ranger(xj ~ ., data = dat_g, num.trees = 500,
+                            mtry = min(5L, ncol(dat_g) - 1),
+                            min.node.size = 5, seed = 43)
+    g_hat <- predict(rf_g, data = X_minus_j)$predictions
+  }
+
+  # e_Y = Y - h_hat (for honest obs only)
   Y_resid <- as.numeric(Y)
   Y_resid[honest_idx] <- Y_resid[honest_idx] - h_hat[honest_idx]
 
-  Y_resid
+  # e_j = X_j - g_hat (for all obs — used in denominator)
+  e_j <- x_j - g_hat
+
+  list(Y_resid = Y_resid, e_j = e_j, g_hat = g_hat)
+}
+
+#' Simple wrapper for backward compatibility — returns just Y_resid
+#' @keywords internal
+.residualize_Y <- function(X, Y, build_idx, honest_idx, var) {
+  res <- .residualize_FWL(X, Y, build_idx, honest_idx, var)
+  res$Y_resid
 }

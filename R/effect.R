@@ -119,7 +119,40 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     contrasts_df$lo[k] <- at_labels[i_lo]
     contrasts_df$hi_val[k] <- at_vals[i_hi]
     contrasts_df$lo_val[k] <- at_vals[i_lo]
-    contrasts_df$estimate[k] <- (val_hi - val_lo) / (at_vals[i_hi] - at_vals[i_lo])
+    raw_slope <- (val_hi - val_lo) / (at_vals[i_hi] - at_vals[i_lo])
+
+    # FWL denominator correction: compute e_j = X_j - g_hat(X_{-j})
+    # Average g_hat across all forests
+    X_minus_j <- object$X[, setdiff(names(object$X), var), drop = FALSE]
+    g_hat_avg <- numeric(nrow(object$X))
+    n_g <- 0
+    for (r in seq_along(object$forests)) {
+      fs <- object$forests[[r]]
+      for (rf_build_idx in list(fs$idxA, fs$idxB)) {
+        dat_g <- X_minus_j[rf_build_idx, , drop = FALSE]
+        dat_g$xj <- x_var[rf_build_idx]
+        rf_g <- ranger::ranger(xj ~ ., data = dat_g, num.trees = 500,
+                                mtry = min(5L, ncol(dat_g) - 1),
+                                min.node.size = 5, seed = 43)
+        g_hat_avg <- g_hat_avg + predict(rf_g, data = X_minus_j)$predictions
+        n_g <- n_g + 1
+      }
+    }
+    g_hat_avg <- g_hat_avg / n_g
+    e_j <- x_var - g_hat_avg
+
+    idx_hi <- x_var >= at_vals[i_hi]
+    idx_lo <- x_var <= at_vals[i_lo]
+    if (sum(idx_hi) > 0 && sum(idx_lo) > 0) {
+      denom_ratio <- (mean(e_j[idx_hi]) - mean(e_j[idx_lo])) / (at_vals[i_hi] - at_vals[i_lo])
+      if (abs(denom_ratio) > 0.05) {
+        contrasts_df$estimate[k] <- raw_slope / denom_ratio
+      } else {
+        contrasts_df$estimate[k] <- raw_slope
+      }
+    } else {
+      contrasts_df$estimate[k] <- raw_slope
+    }
   }
 
   out <- list(
@@ -147,13 +180,23 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     hon_B <- if (!is.null(subset)) intersect(fs$idxB, subset) else fs$idxB
     hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
 
-    Y_resid_AB <- .residualize_Y(object$X, object$Y, fs$idxA, hon_B, var)
-    Y_resid_BA <- .residualize_Y(object$X, object$Y, fs$idxB, hon_A, var)
+    fwl_AB <- .residualize_FWL(object$X, object$Y, fs$idxA, hon_B, var)
+    fwl_BA <- .residualize_FWL(object$X, object$Y, fs$idxB, hon_A, var)
 
-    est_AB <- .extract_binary_one_direction(fs$rfA, object$X, Y_resid_AB,
+    # Numerator: honest contrast on e_Y
+    raw_AB <- .extract_binary_one_direction(fs$rfA, object$X, fwl_AB$Y_resid,
                                              honest_idx = hon_B, var = var)
-    est_BA <- .extract_binary_one_direction(fs$rfB, object$X, Y_resid_BA,
+    raw_BA <- .extract_binary_one_direction(fs$rfB, object$X, fwl_BA$Y_resid,
                                              honest_idx = hon_A, var = var)
+
+    # Denominator correction: mean(e_j | x_j=1) - mean(e_j | x_j=0)
+    x_j <- object$X[[var]]
+    denom_AB <- mean(fwl_AB$e_j[x_j == 1]) - mean(fwl_AB$e_j[x_j == 0])
+    denom_BA <- mean(fwl_BA$e_j[x_j == 1]) - mean(fwl_BA$e_j[x_j == 0])
+
+    est_AB <- if (abs(denom_AB) > 1e-10) raw_AB / denom_AB else raw_AB
+    est_BA <- if (abs(denom_BA) > 1e-10) raw_BA / denom_BA else raw_BA
+
     all_estimates[r] <- (est_AB + est_BA) / 2
   }
 
@@ -236,13 +279,21 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     fs <- object$forests[[r]]
 
     for (j in seq_along(vars)) {
-      Y_resid_AB <- .residualize_Y(object$X, object$Y, fs$idxA, fs$idxB, vars[j])
-      Y_resid_BA <- .residualize_Y(object$X, object$Y, fs$idxB, fs$idxA, vars[j])
+      fwl_AB <- .residualize_FWL(object$X, object$Y, fs$idxA, fs$idxB, vars[j])
+      fwl_BA <- .residualize_FWL(object$X, object$Y, fs$idxB, fs$idxA, vars[j])
 
-      est_AB <- .extract_binary_one_direction(fs$rfA, object$X, Y_resid_AB,
+      raw_AB <- .extract_binary_one_direction(fs$rfA, object$X, fwl_AB$Y_resid,
                                                honest_idx = fs$idxB, var = vars[j])
-      est_BA <- .extract_binary_one_direction(fs$rfB, object$X, Y_resid_BA,
+      raw_BA <- .extract_binary_one_direction(fs$rfB, object$X, fwl_BA$Y_resid,
                                                honest_idx = fs$idxA, var = vars[j])
+
+      x_j <- object$X[[vars[j]]]
+      denom_AB <- mean(fwl_AB$e_j[x_j == 1]) - mean(fwl_AB$e_j[x_j == 0])
+      denom_BA <- mean(fwl_BA$e_j[x_j == 1]) - mean(fwl_BA$e_j[x_j == 0])
+
+      est_AB <- if (abs(denom_AB) > 1e-10) raw_AB / denom_AB else raw_AB
+      est_BA <- if (abs(denom_BA) > 1e-10) raw_BA / denom_BA else raw_BA
+
       all_estimates[r, j] <- (est_AB + est_BA) / 2
     }
   }
