@@ -195,12 +195,29 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   y_hon <- rep(NA_real_, n)
   y_hon[honest_idx] <- as.numeric(Y[honest_idx])
 
+  # Precompute forest-wide augmentation predictions
+  # fhat_ref_0: predict with X_j = 0
+  # fhat_ref_1: predict with X_j = 1
+  X_ref0 <- X_ord
+  X_ref0[, col_idx + 1L] <- 0  # col_idx is 0-based, R matrix is 1-based
+  X_ref1 <- X_ord
+  X_ref1[, col_idx + 1L] <- 1
+
+  pred0 <- predict(rf, data = as.data.frame(X_ref0))$predictions
+  pred1 <- predict(rf, data = as.data.frame(X_ref1))$predictions
+
+  # Package as n x 1 matrices for C++
+  bfr0 <- matrix(pred0, ncol = 1)
+  bfr1 <- matrix(pred1, ncol = 1)
+
   res <- honest_all(
     rf$forest, X_ord, y_hon, as.integer(honest_idx),
     bin_cols = as.integer(col_idx),
     cont_cols = as.integer(integer(0)),
     cont_thresh = numeric(0),
-    per_leaf_denom = TRUE
+    per_leaf_denom = TRUE,
+    bin_fhat_ref_0 = bfr0,
+    bin_fhat_ref_1 = bfr1
   )
 
   res$binary$popavg[1]
@@ -209,7 +226,6 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 
 #' @keywords internal
 .extract_binary_multi_one_direction <- function(rf, X, Y, honest_idx, vars) {
-  # Call honest_all once with all binary column indices
   X_ord <- reorder_X_to_ranger(X, rf)
   col_idxs <- vapply(vars, function(v) get_ranger_col_idx(rf, v), integer(1))
 
@@ -217,15 +233,29 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   y_hon <- rep(NA_real_, n)
   y_hon[honest_idx] <- as.numeric(Y[honest_idx])
 
+  # Precompute augmentation for each binary variable
+  n_bin <- length(vars)
+  bfr0 <- matrix(0, nrow = n, ncol = n_bin)
+  bfr1 <- matrix(0, nrow = n, ncol = n_bin)
+
+  for (j in seq_along(vars)) {
+    ci <- col_idxs[j] + 1L  # 1-based for R matrix
+    X_ref0 <- X_ord; X_ref0[, ci] <- 0
+    X_ref1 <- X_ord; X_ref1[, ci] <- 1
+    bfr0[, j] <- predict(rf, data = as.data.frame(X_ref0))$predictions
+    bfr1[, j] <- predict(rf, data = as.data.frame(X_ref1))$predictions
+  }
+
   res <- honest_all(
     rf$forest, X_ord, y_hon, as.integer(honest_idx),
     bin_cols = as.integer(col_idxs),
     cont_cols = as.integer(integer(0)),
     cont_thresh = numeric(0),
-    per_leaf_denom = TRUE
+    per_leaf_denom = TRUE,
+    bin_fhat_ref_0 = bfr0,
+    bin_fhat_ref_1 = bfr1
   )
 
-  # Return named vector of popavg estimates
   out <- res$binary$popavg
   names(out) <- vars
   out
@@ -250,30 +280,6 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   colMeans(all_estimates)
 }
 
-
-#' @keywords internal
-.extract_curve_slopes <- function(rf, X, Y, honest_idx, var, grid) {
-  X_ord <- reorder_X_to_ranger(X, rf)
-  col_idx <- get_ranger_col_idx(rf, var)
-
-  n <- nrow(X)
-  y_hon <- rep(NA_real_, n)
-  y_hon[honest_idx] <- as.numeric(Y[honest_idx])
-
-  win <- .grid_to_windows(grid)
-
-  res <- honest_curve(
-    rf$forest, X_ord, y_hon, as.integer(honest_idx),
-    col = col_idx,
-    midpoints = win$midpts,
-    window_lo = win$wlo,
-    window_hi = win$whi
-  )
-
-  slopes <- res$popavg_slopes
-  slopes[is.na(slopes)] <- 0
-  slopes
-}
 
 
 #' @keywords internal

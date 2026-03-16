@@ -107,15 +107,22 @@ effect_curve.infForest <- function(object, var, q_lo = 0.10, q_hi = 0.90,
 
   win <- .grid_to_windows(grid)
 
+  # Precompute augmentation: predict with X_j at median
+  mid_val <- median(X_ord[, col_idx + 1L])
+  X_ref <- X_ord
+  X_ref[, col_idx + 1L] <- mid_val
+  fhat_ref <- predict(rf, data = as.data.frame(X_ref))$predictions
+
   res <- honest_curve(
     rf$forest, X_ord, y_hon, as.integer(honest_idx),
     col = col_idx,
     midpoints = win$midpts,
     window_lo = win$wlo,
-    window_hi = win$whi
+    window_hi = win$whi,
+    fhat_ref_vec = fhat_ref
   )
 
-  slopes <- res$popavg_slopes
+  slopes <- res$popavg
   slopes[is.na(slopes)] <- 0
   slopes
 }

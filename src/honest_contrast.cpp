@@ -1,17 +1,17 @@
-// honest_contrast.cpp — Honest effect estimation for random forests
+// honest_contrast.cpp — Honest effect estimation for inference forests
 //
-// All estimators use within-leaf honest contrasts. No counterfactual routing.
+// Binary predictors: Honest counterfactual routing + augmented correction
+//   For each obs i in each tree: route actual X → leaf L, route with X_j flipped → leaf L'
+//   Case 1 (L' ≠ L): contrast = honest_mean(L') - honest_mean(L)
+//   Case 2 (L' = L): contrast = within-leaf group mean difference
+//   Augmentation applied universally: subtract forest-wide non-X_j prediction imbalance
 //
-// Binary predictors: within-leaf group mean difference (X_k=1 vs X_k=0)
-//   Case 1: tree split on X_k → pooled-downstream contrast at split node
-//   Case 2: tree didn't split → within-leaf group means
-//
-// Continuous predictors: within-leaf binned contrast
+// Continuous predictors: within-leaf binned contrast + augmented correction
 //   Bin honest obs into X_k >= threshold vs X_k < threshold
-//   Contrast = mean(Y_honest | X_k >= thresh) - mean(Y_honest | X_k < thresh)
-//   Uses all trees, all leaves. Same logic as binary but with binned groups.
+//   Augmented numerator = (Ybar_hi - Ybar_lo) - (fhat_ref_hi - fhat_ref_lo)
+//   Slope = augmented_numerator / X_gap
 //
-// honest_all: batch all binary + continuous contrasts in one pass per tree.
+// All augmentation uses forest-wide predictions precomputed in R (independent of honest Y)
 
 #include <Rcpp.h>
 #include <vector>
@@ -27,7 +27,10 @@ List honest_all(
     IntegerVector bin_cols,
     IntegerVector cont_cols,
     NumericVector cont_thresh,
-    bool per_leaf_denom = true
+    bool per_leaf_denom = true,
+    Nullable<NumericMatrix> bin_fhat_ref_0 = R_NilValue,
+    Nullable<NumericMatrix> bin_fhat_ref_1 = R_NilValue,
+    Nullable<NumericMatrix> cont_fhat_ref = R_NilValue
 ) {
     List svl = forest["split.varIDs"];
     List svall = forest["split.values"];
@@ -43,6 +46,25 @@ List honest_all(
     std::vector<bool> is_honest(n, false);
     for (int j = 0; j < honest_idx.size(); j++)
         is_honest[honest_idx[j] - 1] = true;
+
+    // Augmentation vectors (precomputed forest-wide predictions)
+    // bin_fhat_ref_0: n x n_bin matrix, predict(forest, X with X_j=0)
+    // bin_fhat_ref_1: n x n_bin matrix, predict(forest, X with X_j=1)
+    // cont_fhat_ref:  n x n_cont matrix, predict(forest, X with X_k=midpoint)
+    bool have_bin_aug = bin_fhat_ref_0.isNotNull() && bin_fhat_ref_1.isNotNull();
+    bool have_cont_aug = cont_fhat_ref.isNotNull();
+    NumericMatrix bfr0, bfr1, cfr;
+    const double *bfr0_ptr = nullptr, *bfr1_ptr = nullptr, *cfr_ptr = nullptr;
+    if (have_bin_aug) {
+        bfr0 = as<NumericMatrix>(bin_fhat_ref_0);
+        bfr1 = as<NumericMatrix>(bin_fhat_ref_1);
+        bfr0_ptr = REAL(bfr0);
+        bfr1_ptr = REAL(bfr1);
+    }
+    if (have_cont_aug) {
+        cfr = as<NumericMatrix>(cont_fhat_ref);
+        cfr_ptr = REAL(cfr);
+    }
 
     // Pre-extract forest structure
     std::vector<std::vector<int>> all_sv(B), all_lc(B), all_rc(B);
@@ -66,7 +88,7 @@ List honest_all(
     std::vector<std::vector<double>> cont_sum(n_cont, std::vector<double>(n, 0.0));
     std::vector<std::vector<double>> cont_cnt(n_cont, std::vector<double>(n, 0.0));
 
-    // Forest-wide weighted sums for popavg — each unique contrast contributes once per tree
+    // Forest-wide weighted sums for popavg
     std::vector<double> bin_global_wsum(n_bin, 0.0);
     std::vector<double> bin_global_wcnt(n_bin, 0.0);
     std::vector<double> cont_global_wsum(n_cont, 0.0);
@@ -91,108 +113,125 @@ List honest_all(
             leaf_id[i] = node;
         }
 
-        // === BINARY CONTRASTS ===
+        // === BINARY CONTRASTS: Honest Counterfactual Routing + Augmentation ===
+        //
+        // Step 1: Compute honest leaf means for this tree
+        std::unordered_map<int, double> h_leaf_ysum;
+        std::unordered_map<int, int> h_leaf_ycnt;
+        for (int i = 0; i < n; i++) {
+            if (!is_honest[i]) continue;
+            double yi = y_ptr[i];
+            if (ISNA(yi)) continue;
+            h_leaf_ysum[leaf_id[i]] += yi;
+            h_leaf_ycnt[leaf_id[i]]++;
+        }
+        std::unordered_map<int, double> h_leaf_mean;
+        for (auto& kv : h_leaf_ycnt) {
+            if (kv.second > 0)
+                h_leaf_mean[kv.first] = h_leaf_ysum[kv.first] / kv.second;
+        }
+
         for (int v = 0; v < n_bin; v++) {
             int col = bcols[v];
 
-            // DFS to label every node with first ancestor that splits on this col
-            std::vector<int> x6_anc(n_nodes, -1);
-            {
-                struct DE { int node; int anc; };
-                std::vector<DE> stk;
-                stk.push_back({0, -1});
-                while (!stk.empty()) {
-                    auto e = stk.back(); stk.pop_back();
-                    x6_anc[e.node] = e.anc;
-                    if (lc[e.node] != 0 || rc[e.node] != 0) {
-                        if (sv[e.node] == col && e.anc < 0) {
-                            stk.push_back({lc[e.node], e.node});
-                            stk.push_back({rc[e.node], e.node});
-                        } else {
-                            stk.push_back({lc[e.node], e.anc});
-                            stk.push_back({rc[e.node], e.anc});
-                        }
-                    }
-                }
-            }
-
-            // Accumulate honest Y by region and binary group
-            struct Sums { double s1=0, s0=0; int n1=0, n0=0; };
-            std::unordered_map<int, Sums> c1_sums, c2_sums;
-
+            // Step 2: Route each honest obs with X_j flipped to find counterfactual leaf
+            std::vector<int> leaf_cf(n, -1);
             for (int i = 0; i < n; i++) {
                 if (!is_honest[i]) continue;
                 double yi = y_ptr[i];
                 if (ISNA(yi)) continue;
                 double xi = X_ptr[i + n * col];
-                int anc = x6_anc[leaf_id[i]];
-                if (anc >= 0) {
-                    auto& s = c1_sums[anc];
-                    if (xi > 0.5) { s.s1 += yi; s.n1++; }
-                    else           { s.s0 += yi; s.n0++; }
+                double xi_flip = (xi > 0.5) ? 0.0 : 1.0;
+
+                int node = 0;
+                while (lc[node] != 0 || rc[node] != 0) {
+                    double xval = (sv[node] == col) ? xi_flip : X_ptr[i + n * sv[node]];
+                    node = (xval <= sval[node]) ? lc[node] : rc[node];
+                }
+                leaf_cf[i] = node;
+            }
+
+            // Step 3: Process Case 1 (L' ≠ L) and accumulate Case 2 (L' = L)
+            struct LeafSums {
+                double s1=0, s0=0, aug1=0, aug0=0;
+                int n1=0, n0=0;
+            };
+            std::unordered_map<int, LeafSums> c2_sums;
+
+            for (int i = 0; i < n; i++) {
+                if (leaf_cf[i] < 0) continue;  // not honest or NA
+                double yi = y_ptr[i];
+                double xi = X_ptr[i + n * col];
+
+                if (leaf_cf[i] != leaf_id[i]) {
+                    // Case 1: counterfactual routing — different leaves
+                    auto it_cf = h_leaf_mean.find(leaf_cf[i]);
+                    auto it_act = h_leaf_mean.find(leaf_id[i]);
+                    if (it_cf != h_leaf_mean.end() && it_act != h_leaf_mean.end()) {
+                        // Raw: honest_mean(X_j=1 leaf) - honest_mean(X_j=0 leaf)
+                        double raw;
+                        if (xi > 0.5) {
+                            raw = it_act->second - it_cf->second;
+                        } else {
+                            raw = it_cf->second - it_act->second;
+                        }
+
+                        // Augmentation correction (forest-wide)
+                        double correction = 0.0;
+                        if (have_bin_aug) {
+                            correction = bfr1_ptr[i + n * v] - bfr0_ptr[i + n * v];
+                        }
+
+                        double contrast = raw - correction;
+
+                        // Obs-level accumulation: equal weight per tree
+                        bin_sum[v][i] += contrast;
+                        bin_cnt[v][i] += 1.0;
+                        bin_global_wsum[v] += contrast;
+                        bin_global_wcnt[v] += 1.0;
+                    }
                 } else {
+                    // Case 2: same leaf — accumulate for within-leaf contrast
+                    double aug_i = 0.0;
+                    if (have_bin_aug) {
+                        aug_i = bfr0_ptr[i + n * v];
+                    }
                     auto& s = c2_sums[leaf_id[i]];
-                    if (xi > 0.5) { s.s1 += yi; s.n1++; }
-                    else           { s.s0 += yi; s.n0++; }
+                    if (xi > 0.5) { s.s1 += yi; s.aug1 += aug_i; s.n1++; }
+                    else           { s.s0 += yi; s.aug0 += aug_i; s.n0++; }
                 }
             }
 
-            // Compute contrasts and inverse-variance weights
-            std::unordered_map<int, double> c1_c, c2_c;
-            std::unordered_map<int, double> c1_w, c2_w;  // harmonic weights
-            for (auto& kv : c1_sums) {
-                auto& s = kv.second;
-                if (s.n1 > 0 && s.n0 > 0) {
-                    c1_c[kv.first] = s.s1 / s.n1 - s.s0 / s.n0;
-                    c1_w[kv.first] = (double)(s.n1 * s.n0) / (double)(s.n1 + s.n0);
-                }
-            }
+            // Step 4: Compute Case 2 augmented contrasts
+            std::unordered_map<int, double> c2_contrast;
+
             for (auto& kv : c2_sums) {
                 auto& s = kv.second;
                 if (s.n1 > 0 && s.n0 > 0) {
-                    c2_c[kv.first] = s.s1 / s.n1 - s.s0 / s.n0;
-                    c2_w[kv.first] = (double)(s.n1 * s.n0) / (double)(s.n1 + s.n0);
+                    double raw = s.s1 / s.n1 - s.s0 / s.n0;
+                    double correction = 0.0;
+                    if (have_bin_aug) {
+                        correction = s.aug1 / s.n1 - s.aug0 / s.n0;
+                    }
+                    c2_contrast[kv.first] = raw - correction;
                 }
             }
 
-            // Accumulate into forest-wide popavg — each contrast once
-            for (auto& kv : c1_c) {
-                double w = c1_w[kv.first];
-                bin_global_wsum[v] += kv.second * w;
-                bin_global_wcnt[v] += w;
-            }
-            for (auto& kv : c2_c) {
-                double w = c2_w[kv.first];
-                bin_global_wsum[v] += kv.second * w;
-                bin_global_wcnt[v] += w;
-            }
-
-            // Assign to obs — for per-observation output
+            // Assign Case 2 contrasts to observations (equal weight per tree)
             for (int i = 0; i < n; i++) {
-                int anc = x6_anc[leaf_id[i]];
-                bool found = false;
-                double contrast = 0.0;
-                double w_region = 0.0;
-                if (anc >= 0) {
-                    auto it = c1_c.find(anc);
-                    if (it != c1_c.end()) { contrast = it->second; w_region = c1_w[anc]; found = true; }
-                } else {
-                    auto it = c2_c.find(leaf_id[i]);
-                    if (it != c2_c.end()) { contrast = it->second; w_region = c2_w[leaf_id[i]]; found = true; }
-                }
-                if (found) {
-                    bin_sum[v][i] += contrast * w_region;
-                    bin_cnt[v][i] += w_region;
+                if (leaf_cf[i] < 0) continue;
+                if (leaf_cf[i] != leaf_id[i]) continue;  // Case 1 already done
+                auto it = c2_contrast.find(leaf_id[i]);
+                if (it != c2_contrast.end()) {
+                    bin_sum[v][i] += it->second;
+                    bin_cnt[v][i] += 1.0;
+                    bin_global_wsum[v] += it->second;
+                    bin_global_wcnt[v] += 1.0;
                 }
             }
         }
 
-        // === CONTINUOUS CONTRASTS (within-leaf binning) ===
-        // Same logic as binary: within each leaf (or pooled-downstream at a split node),
-        // partition honest obs into X_k >= threshold vs X_k < threshold.
-        // Per-leaf slope = (mean_Y_hi - mean_Y_lo) / (mean_Xk_hi - mean_Xk_lo)
-        // Denominator from honest X values only (no Y dependence).
-        // Already on per-unit scale — no external span division needed.
+        // === CONTINUOUS CONTRASTS: Augmented within-leaf binned contrast ===
         for (int m = 0; m < n_cont; m++) {
             int col = ccols[m];
             double thresh = cthresh[m];
@@ -218,9 +257,10 @@ List honest_all(
                 }
             }
 
-            // Accumulate honest Y AND X_k by region and binned group
+            // Accumulate honest Y, X_k, and augmentation by region and binned group
             struct Sums {
                 double sy_hi=0, sy_lo=0, sx_hi=0, sx_lo=0;
+                double sf_hi=0, sf_lo=0;
                 int nhi=0, nlo=0;
             };
             std::unordered_map<int, Sums> c1_sums, c2_sums;
@@ -230,34 +270,37 @@ List honest_all(
                 double yi = y_ptr[i];
                 if (ISNA(yi)) continue;
                 double xi = X_ptr[i + n * col];
+                double fi = (have_cont_aug) ? cfr_ptr[i + n * m] : 0.0;
                 int anc = xk_anc[leaf_id[i]];
                 if (anc >= 0) {
                     auto& s = c1_sums[anc];
-                    if (xi >= thresh) { s.sy_hi += yi; s.sx_hi += xi; s.nhi++; }
-                    else               { s.sy_lo += yi; s.sx_lo += xi; s.nlo++; }
+                    if (xi >= thresh) { s.sy_hi += yi; s.sx_hi += xi; s.sf_hi += fi; s.nhi++; }
+                    else               { s.sy_lo += yi; s.sx_lo += xi; s.sf_lo += fi; s.nlo++; }
                 } else {
                     auto& s = c2_sums[leaf_id[i]];
-                    if (xi >= thresh) { s.sy_hi += yi; s.sx_hi += xi; s.nhi++; }
-                    else               { s.sy_lo += yi; s.sx_lo += xi; s.nlo++; }
+                    if (xi >= thresh) { s.sy_hi += yi; s.sx_hi += xi; s.sf_hi += fi; s.nhi++; }
+                    else               { s.sy_lo += yi; s.sx_lo += xi; s.sf_lo += fi; s.nlo++; }
                 }
             }
 
-            // Compute contrasts and region sizes: per-leaf slope if per_leaf_denom, raw Y diff otherwise
+            // Compute augmented contrasts
             std::unordered_map<int, double> c1_c, c2_c;
-            std::unordered_map<int, double> c1_w, c2_w;  // harmonic weights
+            std::unordered_map<int, double> c1_w, c2_w;
             for (auto& kv : c1_sums) {
                 auto& s = kv.second;
                 if (s.nhi > 0 && s.nlo > 0) {
                     double y_diff = s.sy_hi / s.nhi - s.sy_lo / s.nlo;
+                    double f_diff = (have_cont_aug) ? (s.sf_hi / s.nhi - s.sf_lo / s.nlo) : 0.0;
+                    double aug_num = y_diff - f_diff;
                     double w = (double)(s.nhi * s.nlo) / (double)(s.nhi + s.nlo);
                     if (per_leaf_denom) {
                         double x_gap = s.sx_hi / s.nhi - s.sx_lo / s.nlo;
                         if (std::abs(x_gap) > 1e-10) {
-                            c1_c[kv.first] = y_diff / x_gap;
+                            c1_c[kv.first] = aug_num / x_gap;
                             c1_w[kv.first] = w;
                         }
                     } else {
-                        c1_c[kv.first] = y_diff;
+                        c1_c[kv.first] = aug_num;
                         c1_w[kv.first] = w;
                     }
                 }
@@ -266,21 +309,23 @@ List honest_all(
                 auto& s = kv.second;
                 if (s.nhi > 0 && s.nlo > 0) {
                     double y_diff = s.sy_hi / s.nhi - s.sy_lo / s.nlo;
+                    double f_diff = (have_cont_aug) ? (s.sf_hi / s.nhi - s.sf_lo / s.nlo) : 0.0;
+                    double aug_num = y_diff - f_diff;
                     double w = (double)(s.nhi * s.nlo) / (double)(s.nhi + s.nlo);
                     if (per_leaf_denom) {
                         double x_gap = s.sx_hi / s.nhi - s.sx_lo / s.nlo;
                         if (std::abs(x_gap) > 1e-10) {
-                            c2_c[kv.first] = y_diff / x_gap;
+                            c2_c[kv.first] = aug_num / x_gap;
                             c2_w[kv.first] = w;
                         }
                     } else {
-                        c2_c[kv.first] = y_diff;
+                        c2_c[kv.first] = aug_num;
                         c2_w[kv.first] = w;
                     }
                 }
             }
 
-            // Accumulate into forest-wide popavg — each contrast once
+            // Accumulate into forest-wide popavg
             for (auto& kv : c1_c) {
                 double w = c1_w[kv.first];
                 cont_global_wsum[m] += kv.second * w;
@@ -292,7 +337,7 @@ List honest_all(
                 cont_global_wcnt[m] += w;
             }
 
-            // Assign to obs — for per-observation output
+            // Assign to obs
             for (int i = 0; i < n; i++) {
                 int anc = xk_anc[leaf_id[i]];
                 bool found = false;
@@ -354,19 +399,9 @@ List honest_curve(
     int col,
     NumericVector midpoints,
     NumericVector window_lo,
-    NumericVector window_hi
+    NumericVector window_hi,
+    Nullable<NumericVector> fhat_ref_vec = R_NilValue
 ) {
-    // Curve-based estimation for one continuous predictor.
-    // For each grid interval g with midpoint midpoints[g]:
-    //   - Find estimation region (Case 1: pooled-downstream at first X_j split,
-    //     Case 2: leaf if no split)
-    //   - Restrict honest obs in region to window [window_lo[g], window_hi[g]]
-    //   - Split at midpoints[g]: upper = X_j >= midpoint, lower = X_j < midpoint
-    //   - Compute slope = (Ybar_upper - Ybar_lower) / (Xbar_j_upper - Xbar_j_lower)
-    //   - Skip if either group empty
-    //
-    // Output: per-obs slope at each grid interval, popavg slopes.
-
     List svl = forest["split.varIDs"];
     List svall = forest["split.values"];
     List chl = forest["child.nodeIDs"];
@@ -380,6 +415,14 @@ List honest_curve(
     std::vector<bool> is_honest(n, false);
     for (int j = 0; j < honest_idx.size(); j++)
         is_honest[honest_idx[j] - 1] = true;
+
+    bool have_aug = fhat_ref_vec.isNotNull();
+    NumericVector fhat_ref_nv;
+    const double* fr_ptr = nullptr;
+    if (have_aug) {
+        fhat_ref_nv = as<NumericVector>(fhat_ref_vec);
+        fr_ptr = REAL(fhat_ref_nv);
+    }
 
     std::vector<std::vector<int>> all_sv(B), all_lc(B), all_rc(B);
     std::vector<std::vector<double>> all_sval(B);
@@ -396,11 +439,8 @@ List honest_curve(
     std::vector<double> wlo(window_lo.begin(), window_lo.end());
     std::vector<double> whi(window_hi.begin(), window_hi.end());
 
-    // Accumulators: per-obs, per-grid-interval
     std::vector<std::vector<double>> slope_sum(G, std::vector<double>(n, 0.0));
     std::vector<std::vector<double>> slope_cnt(G, std::vector<double>(n, 0.0));
-
-    // Forest-wide weighted sums for popavg slopes
     std::vector<double> slope_global_wsum(G, 0.0);
     std::vector<double> slope_global_wcnt(G, 0.0);
 
@@ -411,7 +451,6 @@ List honest_curve(
         const int* rc = all_rc[b].data();
         int n_nodes = (int)all_sv[b].size();
 
-        // Route all obs to leaves
         std::vector<int> leaf_id(n);
         for (int i = 0; i < n; i++) {
             int node = 0;
@@ -422,7 +461,6 @@ List honest_curve(
             leaf_id[i] = node;
         }
 
-        // DFS: label nodes with first ancestor that splits on col
         std::vector<int> xj_anc(n_nodes, -1);
         {
             struct DE { int node; int anc; };
@@ -443,15 +481,14 @@ List honest_curve(
             }
         }
 
-        // For each grid interval, accumulate windowed honest sums by region
         for (int g = 0; g < G; g++) {
             double mid = mids[g];
             double wl = wlo[g];
             double wh = whi[g];
 
-            // Accumulate by region key: positive = Case 1 ancestor node, negative = -(leaf+1) for Case 2
             struct Sums {
                 double sy_hi=0, sy_lo=0, sx_hi=0, sx_lo=0;
+                double sf_hi=0, sf_lo=0;
                 int nhi=0, nlo=0;
             };
             std::unordered_map<int, Sums> region_sums;
@@ -461,19 +498,17 @@ List honest_curve(
                 double yi = y_ptr[i];
                 if (ISNA(yi)) continue;
                 double xi = X_ptr[i + n * col];
-
-                // Window filter
                 if (xi < wl || xi > wh) continue;
 
+                double fi = (have_aug) ? fr_ptr[i] : 0.0;
                 int anc = xj_anc[leaf_id[i]];
                 int region_key = (anc >= 0) ? anc : -(leaf_id[i] + 1);
 
                 auto& s = region_sums[region_key];
-                if (xi >= mid) { s.sy_hi += yi; s.sx_hi += xi; s.nhi++; }
-                else            { s.sy_lo += yi; s.sx_lo += xi; s.nlo++; }
+                if (xi >= mid) { s.sy_hi += yi; s.sx_hi += xi; s.sf_hi += fi; s.nhi++; }
+                else            { s.sy_lo += yi; s.sx_lo += xi; s.sf_lo += fi; s.nlo++; }
             }
 
-            // Compute per-region slopes and harmonic weights
             std::unordered_map<int, double> region_slopes;
             std::unordered_map<int, double> region_weights;
             for (auto& kv : region_sums) {
@@ -481,20 +516,20 @@ List honest_curve(
                 if (s.nhi > 0 && s.nlo > 0) {
                     double x_gap = s.sx_hi / s.nhi - s.sx_lo / s.nlo;
                     if (std::abs(x_gap) > 1e-10) {
-                        region_slopes[kv.first] = (s.sy_hi / s.nhi - s.sy_lo / s.nlo) / x_gap;
+                        double y_diff = s.sy_hi / s.nhi - s.sy_lo / s.nlo;
+                        double f_diff = (have_aug) ? (s.sf_hi / s.nhi - s.sf_lo / s.nlo) : 0.0;
+                        region_slopes[kv.first] = (y_diff - f_diff) / x_gap;
                         region_weights[kv.first] = (double)(s.nhi * s.nlo) / (double)(s.nhi + s.nlo);
                     }
                 }
             }
 
-            // Accumulate into forest-wide popavg — each contrast once
             for (auto& kv : region_slopes) {
                 double w = region_weights[kv.first];
                 slope_global_wsum[g] += kv.second * w;
                 slope_global_wcnt[g] += w;
             }
 
-            // Assign to obs — for per-observation output
             for (int i = 0; i < n; i++) {
                 int anc = xj_anc[leaf_id[i]];
                 int region_key = (anc >= 0) ? anc : -(leaf_id[i] + 1);
@@ -508,25 +543,20 @@ List honest_curve(
         }
     }
 
-    // Build output
     NumericVector pa(G);
     List om_list(G);
     for (int g = 0; g < G; g++) {
         NumericVector om(n);
         for (int i = 0; i < n; i++) {
-            if (slope_cnt[g][i] > 0) {
-                om[i] = slope_sum[g][i] / slope_cnt[g][i];
-            } else {
-                om[i] = NA_REAL;
-            }
+            om[i] = (slope_cnt[g][i] > 0) ? slope_sum[g][i] / slope_cnt[g][i] : NA_REAL;
         }
         pa[g] = (slope_global_wcnt[g] > 0) ? slope_global_wsum[g] / slope_global_wcnt[g] : NA_REAL;
         om_list[g] = om;
     }
 
     return List::create(
-        Named("popavg_slopes") = pa,
-        Named("obs_slopes") = om_list
+        Named("popavg") = pa,
+        Named("obs_mean") = om_list
     );
 }
 
@@ -541,20 +571,6 @@ List honest_interaction_2x2(
     int cont_col,
     double cont_thresh
 ) {
-    // Within-leaf 2x2 interaction: bin_col (binary 0/1) x cont_col (>= thresh vs < thresh)
-    //
-    // For each tree, for each leaf (or pooled-downstream region):
-    //   Compute 4 cell means from honest obs:
-    //     m_11 = mean(Y | bin=1, cont >= thresh)
-    //     m_10 = mean(Y | bin=1, cont < thresh)
-    //     m_01 = mean(Y | bin=0, cont >= thresh)
-    //     m_00 = mean(Y | bin=0, cont < thresh)
-    //   Interaction = (m_11 - m_10) - (m_01 - m_00)
-    //   i.e., the cont effect among bin=1 minus the cont effect among bin=0
-    //
-    // Every leaf contributes if all 4 cells have honest obs.
-    // Skip if any cell is empty.
-
     List svl = forest["split.varIDs"];
     List svall = forest["split.values"];
     List chl = forest["child.nodeIDs"];
@@ -581,8 +597,6 @@ List honest_interaction_2x2(
 
     std::vector<double> obs_sum(n, 0.0);
     std::vector<double> obs_cnt(n, 0.0);
-
-    // Forest-wide weighted sum for popavg
     double int_global_wsum = 0.0;
     double int_global_wcnt = 0.0;
 
@@ -592,7 +606,6 @@ List honest_interaction_2x2(
         const int* lc = all_lc[b].data();
         const int* rc = all_rc[b].data();
 
-        // Walk all obs to leaves
         std::vector<int> leaf_id(n);
         for (int i = 0; i < n; i++) {
             int node = 0;
@@ -603,43 +616,29 @@ List honest_interaction_2x2(
             leaf_id[i] = node;
         }
 
-        // DFS: label nodes with first ancestor that splits on EITHER bin_col or cont_col
-        // We need the coarsest region where both variables can be contrasted.
-        // Use the leaf directly — every leaf gets a 2x2 contrast from honest obs.
-        // No Case 1 / Case 2 distinction needed for the interaction itself —
-        // we just need the 4 cell means within whatever region the obs lands in.
-        //
-        // Simplest correct approach: use the leaf. Partition honest obs in each
-        // leaf into the 4 cells. Compute difference-in-differences.
-
-        struct Cell4 {
-            double sy11=0,sy10=0,sy01=0,sy00=0;
-            double sx11=0,sx10=0,sx01=0,sx00=0;
-            int n11=0,n10=0,n01=0,n00=0;
+        struct Cell {
+            double sy11=0, sy10=0, sy01=0, sy00=0;
+            double sx11=0, sx10=0, sx01=0, sx00=0;
+            int n11=0, n10=0, n01=0, n00=0;
         };
-        std::unordered_map<int, Cell4> leaf_cells;
+        std::unordered_map<int, Cell> leaf_cells;
 
         for (int i = 0; i < n; i++) {
             if (!is_honest[i]) continue;
             double yi = y_ptr[i];
             if (ISNA(yi)) continue;
-            double bi = X_ptr[i + n * bin_col];
-            double ci = X_ptr[i + n * cont_col];
-            int b_group = (bi > 0.5) ? 1 : 0;
-            int c_group = (ci >= cont_thresh) ? 1 : 0;
-
-            auto& cell = leaf_cells[leaf_id[i]];
-            if (b_group == 1 && c_group == 1)      { cell.sy11 += yi; cell.sx11 += ci; cell.n11++; }
-            else if (b_group == 1 && c_group == 0)  { cell.sy10 += yi; cell.sx10 += ci; cell.n10++; }
-            else if (b_group == 0 && c_group == 1)  { cell.sy01 += yi; cell.sx01 += ci; cell.n01++; }
-            else                                     { cell.sy00 += yi; cell.sx00 += ci; cell.n00++; }
+            double xb = X_ptr[i + n * bin_col];
+            double xc = X_ptr[i + n * cont_col];
+            auto& c = leaf_cells[leaf_id[i]];
+            if (xb > 0.5) {
+                if (xc >= cont_thresh) { c.sy11 += yi; c.sx11 += xc; c.n11++; }
+                else                    { c.sy10 += yi; c.sx10 += xc; c.n10++; }
+            } else {
+                if (xc >= cont_thresh) { c.sy01 += yi; c.sx01 += xc; c.n01++; }
+                else                    { c.sy00 += yi; c.sx00 += xc; c.n00++; }
+            }
         }
 
-        // Compute per-unit interaction per leaf
-        // Numerator: 4-cell difference-in-differences on Y
-        // Denominator: 2-group x2 gap (same as main effect denominator)
-        //   = mean(x2 | x2 >= thresh, in leaf) - mean(x2 | x2 < thresh, in leaf)
-        //   pooled across both x6 groups
         std::unordered_map<int, double> leaf_int;
         std::unordered_map<int, double> leaf_int_w;
         for (auto& kv : leaf_cells) {
@@ -648,7 +647,6 @@ List honest_interaction_2x2(
                 double my11 = c.sy11/c.n11, my10 = c.sy10/c.n10;
                 double my01 = c.sy01/c.n01, my00 = c.sy00/c.n00;
                 double raw_int = (my11 - my10) - (my01 - my00);
-                // x2 gap pooled across x6 groups (same as main effect denominator)
                 double sx_hi_total = c.sx11 + c.sx01;
                 int n_hi_total = c.n11 + c.n01;
                 double sx_lo_total = c.sx10 + c.sx00;
@@ -656,21 +654,18 @@ List honest_interaction_2x2(
                 double x_gap = sx_hi_total / n_hi_total - sx_lo_total / n_lo_total;
                 if (std::abs(x_gap) > 1e-10) {
                     leaf_int[kv.first] = raw_int / x_gap;
-                    // Inverse-variance weight: 1/(1/n11 + 1/n10 + 1/n01 + 1/n00)
                     double inv_w = 1.0/c.n11 + 1.0/c.n10 + 1.0/c.n01 + 1.0/c.n00;
                     leaf_int_w[kv.first] = 1.0 / inv_w;
                 }
             }
         }
 
-        // Accumulate into forest-wide popavg — each contrast once
         for (auto& kv : leaf_int) {
             double w = leaf_int_w[kv.first];
             int_global_wsum += kv.second * w;
             int_global_wcnt += w;
         }
 
-        // Assign to obs — for per-observation output
         for (int i = 0; i < n; i++) {
             auto it = leaf_int.find(leaf_id[i]);
             if (it != leaf_int.end()) {
@@ -681,19 +676,15 @@ List honest_interaction_2x2(
         }
     }
 
-    // Output
-    NumericVector obs_mean(n);
-    for (int i = 0; i < n; i++) {
-        if (obs_cnt[i] > 0) {
-            obs_mean[i] = obs_sum[i] / obs_cnt[i];
-        } else {
-            obs_mean[i] = NA_REAL;
-        }
-    }
     double popavg = (int_global_wcnt > 0) ? int_global_wsum / int_global_wcnt : NA_REAL;
+
+    NumericVector om(n);
+    for (int i = 0; i < n; i++) {
+        om[i] = (obs_cnt[i] > 0) ? obs_sum[i] / obs_cnt[i] : NA_REAL;
+    }
 
     return List::create(
         Named("popavg") = popavg,
-        Named("obs_mean") = obs_mean
+        Named("obs_mean") = om
     );
 }
