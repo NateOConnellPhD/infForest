@@ -60,11 +60,17 @@ List honest_all(
     std::vector<int> ccols(cont_cols.begin(), cont_cols.end());
     std::vector<double> cthresh(cont_thresh.begin(), cont_thresh.end());
 
-    // Accumulators
+    // Accumulators — per-observation (for obs_mean output)
     std::vector<std::vector<double>> bin_sum(n_bin, std::vector<double>(n, 0.0));
     std::vector<std::vector<int>> bin_cnt(n_bin, std::vector<int>(n, 0));
     std::vector<std::vector<double>> cont_sum(n_cont, std::vector<double>(n, 0.0));
     std::vector<std::vector<int>> cont_cnt(n_cont, std::vector<int>(n, 0));
+
+    // Forest-wide weighted sums for popavg — each unique contrast contributes once per tree
+    std::vector<double> bin_global_wsum(n_bin, 0.0);
+    std::vector<double> bin_global_wcnt(n_bin, 0.0);
+    std::vector<double> cont_global_wsum(n_cont, 0.0);
+    std::vector<double> cont_global_wcnt(n_cont, 0.0);
 
     // ========== TREE LOOP ==========
     for (int b = 0; b < B; b++) {
@@ -149,7 +155,19 @@ List honest_all(
                 }
             }
 
-            // Assign to obs — weighted by region size
+            // Accumulate into forest-wide popavg — each contrast once
+            for (auto& kv : c1_c) {
+                int nr = c1_n[kv.first];
+                bin_global_wsum[v] += kv.second * nr;
+                bin_global_wcnt[v] += nr;
+            }
+            for (auto& kv : c2_c) {
+                int nr = c2_n[kv.first];
+                bin_global_wsum[v] += kv.second * nr;
+                bin_global_wcnt[v] += nr;
+            }
+
+            // Assign to obs — for per-observation output
             for (int i = 0; i < n; i++) {
                 int anc = x6_anc[leaf_id[i]];
                 bool found = false;
@@ -260,7 +278,19 @@ List honest_all(
                 }
             }
 
-            // Assign to obs — weighted by region size
+            // Accumulate into forest-wide popavg — each contrast once
+            for (auto& kv : c1_c) {
+                int nr = c1_n[kv.first];
+                cont_global_wsum[m] += kv.second * nr;
+                cont_global_wcnt[m] += nr;
+            }
+            for (auto& kv : c2_c) {
+                int nr = c2_n[kv.first];
+                cont_global_wsum[m] += kv.second * nr;
+                cont_global_wcnt[m] += nr;
+            }
+
+            // Assign to obs — for per-observation output
             for (int i = 0; i < n; i++) {
                 int anc = xk_anc[leaf_id[i]];
                 bool found = false;
@@ -284,30 +314,27 @@ List honest_all(
 
     // Build output
     auto build_out = [&](int nv, std::vector<std::vector<double>>& sums,
-                         std::vector<std::vector<int>>& counts) {
+                         std::vector<std::vector<int>>& counts,
+                         std::vector<double>& gwsum, std::vector<double>& gwcnt) {
         NumericVector pa(nv);
         List om_list(nv);
         for (int v = 0; v < nv; v++) {
             NumericVector om(n);
-            double total_wsum = 0.0;
-            double total_wcnt = 0.0;
             for (int i = 0; i < n; i++) {
                 if (counts[v][i] > 0) {
                     om[i] = sums[v][i] / counts[v][i];
-                    total_wsum += sums[v][i];
-                    total_wcnt += counts[v][i];
                 } else {
                     om[i] = NA_REAL;
                 }
             }
-            pa[v] = (total_wcnt > 0) ? total_wsum / total_wcnt : NA_REAL;
+            pa[v] = (gwcnt[v] > 0) ? gwsum[v] / gwcnt[v] : NA_REAL;
             om_list[v] = om;
         }
         return List::create(Named("popavg") = pa, Named("obs_mean") = om_list);
     };
 
-    List bin_out = build_out(n_bin, bin_sum, bin_cnt);
-    List cont_out = build_out(n_cont, cont_sum, cont_cnt);
+    List bin_out = build_out(n_bin, bin_sum, bin_cnt, bin_global_wsum, bin_global_wcnt);
+    List cont_out = build_out(n_cont, cont_sum, cont_cnt, cont_global_wsum, cont_global_wcnt);
 
     return List::create(
         Named("binary") = bin_out,
@@ -370,6 +397,10 @@ List honest_curve(
     // Accumulators: per-obs, per-grid-interval
     std::vector<std::vector<double>> slope_sum(G, std::vector<double>(n, 0.0));
     std::vector<std::vector<int>> slope_cnt(G, std::vector<int>(n, 0));
+
+    // Forest-wide weighted sums for popavg slopes
+    std::vector<double> slope_global_wsum(G, 0.0);
+    std::vector<double> slope_global_wcnt(G, 0.0);
 
     for (int b = 0; b < B; b++) {
         const int* sv = all_sv[b].data();
@@ -454,7 +485,14 @@ List honest_curve(
                 }
             }
 
-            // Assign to obs — weighted by region size
+            // Accumulate into forest-wide popavg — each contrast once
+            for (auto& kv : region_slopes) {
+                int nr = region_sizes[kv.first];
+                slope_global_wsum[g] += kv.second * nr;
+                slope_global_wcnt[g] += nr;
+            }
+
+            // Assign to obs — for per-observation output
             for (int i = 0; i < n; i++) {
                 int anc = xj_anc[leaf_id[i]];
                 int region_key = (anc >= 0) ? anc : -(leaf_id[i] + 1);
@@ -473,18 +511,14 @@ List honest_curve(
     List om_list(G);
     for (int g = 0; g < G; g++) {
         NumericVector om(n);
-        double total_wsum = 0.0;
-        double total_wcnt = 0.0;
         for (int i = 0; i < n; i++) {
             if (slope_cnt[g][i] > 0) {
                 om[i] = slope_sum[g][i] / slope_cnt[g][i];
-                total_wsum += slope_sum[g][i];
-                total_wcnt += slope_cnt[g][i];
             } else {
                 om[i] = NA_REAL;
             }
         }
-        pa[g] = (total_wcnt > 0) ? total_wsum / total_wcnt : NA_REAL;
+        pa[g] = (slope_global_wcnt[g] > 0) ? slope_global_wsum[g] / slope_global_wcnt[g] : NA_REAL;
         om_list[g] = om;
     }
 
@@ -545,6 +579,10 @@ List honest_interaction_2x2(
 
     std::vector<double> obs_sum(n, 0.0);
     std::vector<int> obs_cnt(n, 0);
+
+    // Forest-wide weighted sum for popavg
+    double int_global_wsum = 0.0;
+    double int_global_wcnt = 0.0;
 
     for (int b = 0; b < B; b++) {
         const int* sv = all_sv[b].data();
@@ -621,7 +659,14 @@ List honest_interaction_2x2(
             }
         }
 
-        // Assign to obs — weighted by region size
+        // Accumulate into forest-wide popavg — each contrast once
+        for (auto& kv : leaf_int) {
+            int nr = leaf_int_n[kv.first];
+            int_global_wsum += kv.second * nr;
+            int_global_wcnt += nr;
+        }
+
+        // Assign to obs — for per-observation output
         for (int i = 0; i < n; i++) {
             auto it = leaf_int.find(leaf_id[i]);
             if (it != leaf_int.end()) {
@@ -634,18 +679,14 @@ List honest_interaction_2x2(
 
     // Output
     NumericVector obs_mean(n);
-    double total_wsum = 0.0;
-    double total_wcnt = 0.0;
     for (int i = 0; i < n; i++) {
         if (obs_cnt[i] > 0) {
             obs_mean[i] = obs_sum[i] / obs_cnt[i];
-            total_wsum += obs_sum[i];
-            total_wcnt += obs_cnt[i];
         } else {
             obs_mean[i] = NA_REAL;
         }
     }
-    double popavg = (total_wcnt > 0) ? total_wsum / total_wcnt : NA_REAL;
+    double popavg = (int_global_wcnt > 0) ? int_global_wsum / int_global_wcnt : NA_REAL;
 
     return List::create(
         Named("popavg") = popavg,
@@ -708,6 +749,10 @@ List honest_predict_contrast(
 
     std::vector<std::vector<double>> cont_sum(n_cont, std::vector<double>(n, 0.0));
     std::vector<std::vector<int>> cont_cnt(n_cont, std::vector<int>(n, 0));
+
+    // Forest-wide weighted sums for popavg
+    std::vector<double> pc_global_wsum(n_cont, 0.0);
+    std::vector<double> pc_global_wcnt(n_cont, 0.0);
 
     for (int b = 0; b < B; b++) {
         const int* sv = all_sv[b].data();
@@ -807,7 +852,14 @@ List honest_predict_contrast(
                 }
             }
 
-            // --- Assign contrasts to obs — weighted by region size ---
+            // Case 2 global accumulation — each unique contrast once
+            for (auto& kv : c2_contrasts) {
+                int nr = c2_n[kv.first];
+                pc_global_wsum[m] += kv.second * nr;
+                pc_global_wcnt[m] += nr;
+            }
+
+            // --- Assign contrasts to obs and accumulate Case 1 globally ---
             for (int i = 0; i < n; i++) {
                 int anc = xj_anc[leaf_id[i]];
                 bool found = false;
@@ -853,28 +905,29 @@ List honest_predict_contrast(
                 if (found) {
                     cont_sum[m][i] += contrast * n_region;
                     cont_cnt[m][i] += n_region;
+                    // Case 1 per-obs contrasts: accumulate globally
+                    if (xj_anc[leaf_id[i]] >= 0) {
+                        pc_global_wsum[m] += contrast * n_region;
+                        pc_global_wcnt[m] += n_region;
+                    }
                 }
             }
         }
     }
 
-    // Build output
+    // Build output — popavg from forest-wide weighted sum
     NumericVector pa(n_cont);
     List om_list(n_cont);
     for (int m = 0; m < n_cont; m++) {
         NumericVector om(n);
-        double total_wsum = 0.0;
-        double total_wcnt = 0.0;
         for (int i = 0; i < n; i++) {
             if (cont_cnt[m][i] > 0) {
                 om[i] = cont_sum[m][i] / cont_cnt[m][i];
-                total_wsum += cont_sum[m][i];
-                total_wcnt += cont_cnt[m][i];
             } else {
                 om[i] = NA_REAL;
             }
         }
-        pa[m] = (total_wcnt > 0) ? total_wsum / total_wcnt : NA_REAL;
+        pa[m] = (pc_global_wcnt[m] > 0) ? pc_global_wsum[m] / pc_global_wcnt[m] : NA_REAL;
         om_list[m] = om;
     }
 
