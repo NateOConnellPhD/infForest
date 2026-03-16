@@ -337,6 +337,10 @@ List honest_all(
 
     List bin_out = build_out(n_bin, bin_sum, bin_cnt, bin_global_wsum, bin_global_wcnt);
     List cont_out = build_out(n_cont, cont_sum, cont_cnt, cont_global_wsum, cont_global_wcnt);
+    
+    Rcpp::Rcout << "DEBUG bin_global_wsum[0]=" << bin_global_wsum[0]
+                << " bin_global_wcnt[0]=" << bin_global_wcnt[0]
+                << " popavg=" << bin_global_wsum[0]/bin_global_wcnt[0] << std::endl;
 
     return List::create(
         Named("binary") = bin_out,
