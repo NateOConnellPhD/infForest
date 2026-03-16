@@ -151,7 +151,22 @@ List honest_all(
                 leaf_cf[i] = node;
             }
 
-            // Step 3: Process Case 1 (L' ≠ L) and accumulate Case 2 (L' = L)
+            // Step 3: Compute honest leaf means of fhat_ref_0 for augmentation
+            // fhat_ref_0(X_i) = forest prediction with X_j=0 — same reference for all obs
+            // The leaf-mean difference captures non-X_j covariate imbalance between leaves
+            std::unordered_map<int, double> leaf_fref_sum;
+            std::unordered_map<int, int> leaf_fref_cnt;
+            if (have_bin_aug) {
+                for (int i = 0; i < n; i++) {
+                    if (!is_honest[i]) continue;
+                    double yi = y_ptr[i];
+                    if (ISNA(yi)) continue;
+                    leaf_fref_sum[leaf_id[i]] += bfr0_ptr[i + n * v];
+                    leaf_fref_cnt[leaf_id[i]]++;
+                }
+            }
+
+            // Step 4: Process Case 1 (L' ≠ L) and accumulate Case 2 (L' = L)
             struct LeafSums {
                 double s1=0, s0=0, aug1=0, aug0=0;
                 int n1=0, n0=0;
@@ -176,10 +191,16 @@ List honest_all(
                             raw = it_cf->second - it_act->second;
                         }
 
-                        // Augmentation correction (forest-wide)
+                        // Augmentation: leaf-mean difference of fhat_ref_0
+                        // This captures non-X_j covariate imbalance between the two leaves
                         double correction = 0.0;
                         if (have_bin_aug) {
-                            correction = bfr1_ptr[i + n * v] - bfr0_ptr[i + n * v];
+                            int leaf_hi, leaf_lo;
+                            if (xi > 0.5) { leaf_hi = leaf_id[i]; leaf_lo = leaf_cf[i]; }
+                            else           { leaf_hi = leaf_cf[i]; leaf_lo = leaf_id[i]; }
+                            double fref_hi = leaf_fref_sum[leaf_hi] / (double)leaf_fref_cnt[leaf_hi];
+                            double fref_lo = leaf_fref_sum[leaf_lo] / (double)leaf_fref_cnt[leaf_lo];
+                            correction = fref_hi - fref_lo;
                         }
 
                         double contrast = raw - correction;
