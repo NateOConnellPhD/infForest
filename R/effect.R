@@ -110,35 +110,6 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     stringsAsFactors = FALSE
   )
 
-  # Global augmentation correction for continuous variables
-  # Predict with X_j at median (reference), compare groups defined by at_vals
-  global_corrections <- numeric(n_pairs)
-  for (k in seq_len(n_pairs)) {
-    i_lo <- pairs[1, k]
-    i_hi <- pairs[2, k]
-    val_lo_k <- at_vals[i_lo]
-    val_hi_k <- at_vals[i_hi]
-    mid_ref <- (val_lo_k + val_hi_k) / 2
-    X_ref <- object$X; X_ref[[var]] <- mid_ref
-    # Average predictions across all forests (both directions)
-    all_pred_ref <- numeric(nrow(object$X))
-    n_forests <- 0
-    for (r in seq_along(object$forests)) {
-      fs <- object$forests[[r]]
-      all_pred_ref <- all_pred_ref + predict(fs$rfA, data = X_ref)$predictions
-      all_pred_ref <- all_pred_ref + predict(fs$rfB, data = X_ref)$predictions
-      n_forests <- n_forests + 2
-    }
-    all_pred_ref <- all_pred_ref / n_forests
-
-    idx_hi <- x_var >= val_hi_k
-    idx_lo <- x_var <= val_lo_k
-    if (sum(idx_hi) > 0 && sum(idx_lo) > 0) {
-      global_corrections[k] <- (mean(all_pred_ref[idx_hi]) - mean(all_pred_ref[idx_lo])) /
-                                (val_hi_k - val_lo_k)
-    }
-  }
-
   for (k in seq_len(n_pairs)) {
     i_lo <- pairs[1, k]
     i_hi <- pairs[2, k]
@@ -148,8 +119,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     contrasts_df$lo[k] <- at_labels[i_lo]
     contrasts_df$hi_val[k] <- at_vals[i_hi]
     contrasts_df$lo_val[k] <- at_vals[i_lo]
-    raw_slope <- (val_hi - val_lo) / (at_vals[i_hi] - at_vals[i_lo])
-    contrasts_df$estimate[k] <- raw_slope - global_corrections[k]
+    contrasts_df$estimate[k] <- (val_hi - val_lo) / (at_vals[i_hi] - at_vals[i_lo])
   }
 
   out <- list(
@@ -227,7 +197,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 
   # Precompute forest-wide non-X_j prediction (X_j set to 0 for all)
   X_ref0 <- X; X_ref0[[var]] <- 0
-  pred_ref <- predict(rf, data = X_ref0)$predictions
+  pred_ref <- .get_pred_vector(rf, X_ref0)
 
   # Raw contrast
   res <- honest_all(
@@ -282,7 +252,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   out <- numeric(length(vars))
   for (j in seq_along(vars)) {
     X_ref0 <- X; X_ref0[[vars[j]]] <- 0
-    pred_ref <- predict(rf, data = X_ref0)$predictions
+    pred_ref <- .get_pred_vector(rf, X_ref0)
 
     x_vals <- X[[vars[j]]]
     fref_vals <- pred_ref

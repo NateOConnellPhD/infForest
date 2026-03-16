@@ -22,8 +22,7 @@ List honest_all(
     IntegerVector bin_cols,
     IntegerVector cont_cols,
     NumericVector cont_thresh,
-    bool per_leaf_denom = true,
-    SEXP cont_fhat_ref = R_NilValue
+    bool per_leaf_denom = true
 ) {
     List svl = forest["split.varIDs"];
     List svall = forest["split.values"];
@@ -39,15 +38,6 @@ List honest_all(
     std::vector<bool> is_honest(n, false);
     for (int j = 0; j < honest_idx.size(); j++)
         is_honest[honest_idx[j] - 1] = true;
-
-    // Continuous augmentation (precomputed forest-wide predictions)
-    bool have_cont_aug = (cont_fhat_ref != R_NilValue);
-    NumericMatrix cfr;
-    const double* cfr_ptr = nullptr;
-    if (have_cont_aug) {
-        cfr = as<NumericMatrix>(cont_fhat_ref);
-        cfr_ptr = REAL(cfr);
-    }
 
     // Pre-extract forest structure
     std::vector<std::vector<int>> all_sv(B), all_lc(B), all_rc(B);
@@ -173,10 +163,9 @@ List honest_all(
                 }
             }
 
-            // Accumulate honest Y, X_k, and augmentation
+            // Accumulate honest Y and X_k by region
             struct Sums {
                 double sy_hi=0, sy_lo=0, sx_hi=0, sx_lo=0;
-                double sf_hi=0, sf_lo=0;
                 int nhi=0, nlo=0;
             };
             std::unordered_map<int, Sums> c1_sums, c2_sums;
@@ -186,20 +175,19 @@ List honest_all(
                 double yi = y_ptr[i];
                 if (ISNA(yi)) continue;
                 double xi = X_ptr[i + n * col];
-                double fi = (have_cont_aug) ? cfr_ptr[i + n * m] : 0.0;
                 int anc = xk_anc[leaf_id[i]];
                 if (anc >= 0) {
                     auto& s = c1_sums[anc];
-                    if (xi >= thresh) { s.sy_hi += yi; s.sx_hi += xi; s.sf_hi += fi; s.nhi++; }
-                    else               { s.sy_lo += yi; s.sx_lo += xi; s.sf_lo += fi; s.nlo++; }
+                    if (xi >= thresh) { s.sy_hi += yi; s.sx_hi += xi; s.nhi++; }
+                    else               { s.sy_lo += yi; s.sx_lo += xi; s.nlo++; }
                 } else {
                     auto& s = c2_sums[leaf_id[i]];
-                    if (xi >= thresh) { s.sy_hi += yi; s.sx_hi += xi; s.sf_hi += fi; s.nhi++; }
-                    else               { s.sy_lo += yi; s.sx_lo += xi; s.sf_lo += fi; s.nlo++; }
+                    if (xi >= thresh) { s.sy_hi += yi; s.sx_hi += xi; s.nhi++; }
+                    else               { s.sy_lo += yi; s.sx_lo += xi; s.nlo++; }
                 }
             }
 
-            // Compute augmented contrasts
+            // Compute contrasts
             auto compute_contrasts = [&](std::unordered_map<int, Sums>& sums_map,
                                          std::unordered_map<int, double>& out_c,
                                          std::unordered_map<int, double>& out_w) {
@@ -207,17 +195,15 @@ List honest_all(
                     auto& s = kv.second;
                     if (s.nhi > 0 && s.nlo > 0) {
                         double y_diff = s.sy_hi / s.nhi - s.sy_lo / s.nlo;
-                        double f_diff = (have_cont_aug) ? (s.sf_hi / s.nhi - s.sf_lo / s.nlo) : 0.0;
-                        double aug_num = y_diff - f_diff;
                         double w = (double)(s.nhi * s.nlo) / (double)(s.nhi + s.nlo);
                         if (per_leaf_denom) {
                             double x_gap = s.sx_hi / s.nhi - s.sx_lo / s.nlo;
                             if (std::abs(x_gap) > 1e-10) {
-                                out_c[kv.first] = aug_num / x_gap;
+                                out_c[kv.first] = y_diff / x_gap;
                                 out_w[kv.first] = w;
                             }
                         } else {
-                            out_c[kv.first] = aug_num;
+                            out_c[kv.first] = y_diff;
                             out_w[kv.first] = w;
                         }
                     }
@@ -282,8 +268,7 @@ List honest_curve(
     int col,
     NumericVector midpoints,
     NumericVector window_lo,
-    NumericVector window_hi,
-    SEXP fhat_ref_vec = R_NilValue
+    NumericVector window_hi
 ) {
     List svl = forest["split.varIDs"];
     List svall = forest["split.values"];
@@ -298,14 +283,6 @@ List honest_curve(
     std::vector<bool> is_honest(n, false);
     for (int j = 0; j < honest_idx.size(); j++)
         is_honest[honest_idx[j] - 1] = true;
-
-    bool have_aug = (fhat_ref_vec != R_NilValue);
-    NumericVector fhat_ref_nv;
-    const double* fr_ptr = nullptr;
-    if (have_aug) {
-        fhat_ref_nv = as<NumericVector>(fhat_ref_vec);
-        fr_ptr = REAL(fhat_ref_nv);
-    }
 
     std::vector<std::vector<int>> all_sv(B), all_lc(B), all_rc(B);
     std::vector<std::vector<double>> all_sval(B);
@@ -371,7 +348,6 @@ List honest_curve(
 
             struct Sums {
                 double sy_hi=0, sy_lo=0, sx_hi=0, sx_lo=0;
-                double sf_hi=0, sf_lo=0;
                 int nhi=0, nlo=0;
             };
             std::unordered_map<int, Sums> region_sums;
@@ -383,13 +359,12 @@ List honest_curve(
                 double xi = X_ptr[i + n * col];
                 if (xi < wl || xi > wh) continue;
 
-                double fi = (have_aug) ? fr_ptr[i] : 0.0;
                 int anc = xj_anc[leaf_id[i]];
                 int region_key = (anc >= 0) ? anc : -(leaf_id[i] + 1);
 
                 auto& s = region_sums[region_key];
-                if (xi >= mid) { s.sy_hi += yi; s.sx_hi += xi; s.sf_hi += fi; s.nhi++; }
-                else            { s.sy_lo += yi; s.sx_lo += xi; s.sf_lo += fi; s.nlo++; }
+                if (xi >= mid) { s.sy_hi += yi; s.sx_hi += xi; s.nhi++; }
+                else            { s.sy_lo += yi; s.sx_lo += xi; s.nlo++; }
             }
 
             std::unordered_map<int, double> region_slopes;
@@ -400,8 +375,7 @@ List honest_curve(
                     double x_gap = s.sx_hi / s.nhi - s.sx_lo / s.nlo;
                     if (std::abs(x_gap) > 1e-10) {
                         double y_diff = s.sy_hi / s.nhi - s.sy_lo / s.nlo;
-                        double f_diff = (have_aug) ? (s.sf_hi / s.nhi - s.sf_lo / s.nlo) : 0.0;
-                        region_slopes[kv.first] = (y_diff - f_diff) / x_gap;
+                        region_slopes[kv.first] = y_diff / x_gap;
                         region_weights[kv.first] = (double)(s.nhi * s.nlo) / (double)(s.nhi + s.nlo);
                     }
                 }

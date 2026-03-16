@@ -1,7 +1,3 @@
-#' @useDynLib infForest, .registration = TRUE
-#' @importFrom Rcpp sourceCpp
-NULL
-
 #' @keywords internal
 logit_fn <- function(z) 1 / (1 + exp(-z))
 
@@ -57,4 +53,15 @@ get_ranger_col_idx <- function(rf, varname) {
 reorder_X_to_ranger <- function(X, rf) {
   vnames <- rf$forest$independent.variable.names
   as.matrix(X[, vnames])
+}
+
+#' Extract predictions as numeric vector (handles both regression and probability forests)
+#' @keywords internal
+.get_pred_vector <- function(rf, newdata) {
+  p <- predict(rf, data = newdata)$predictions
+  if (is.matrix(p)) {
+    # Probability forest: return P(Y=1) column
+    return(p[, ncol(p)])
+  }
+  as.numeric(p)
 }

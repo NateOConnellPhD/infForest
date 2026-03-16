@@ -260,33 +260,7 @@ int <- function(...) interaction(...)
     all_estimates[r] <- (val_a - val_b) / (a - b)
   }
 
-  raw_slope <- mean(all_estimates)
-
-  # Global augmentation correction for continuous variable
-  mid_ref <- (a + b) / 2
-  X_ref <- object$X; X_ref[[var]] <- mid_ref
-  all_pred_ref <- numeric(nrow(object$X))
-  n_forests <- 0
-  for (r in seq_along(object$forests)) {
-    fs <- object$forests[[r]]
-    all_pred_ref <- all_pred_ref + predict(fs$rfA, data = X_ref)$predictions
-    all_pred_ref <- all_pred_ref + predict(fs$rfB, data = X_ref)$predictions
-    n_forests <- n_forests + 2
-  }
-  all_pred_ref <- all_pred_ref / n_forests
-
-  # Use subset_idx observations for the correction (matches the subgroup being estimated)
-  x_sub <- x_var[subset_idx]
-  fref_sub <- all_pred_ref[subset_idx]
-  idx_hi <- x_sub >= a
-  idx_lo <- x_sub <= b
-  if (sum(idx_hi) > 0 && sum(idx_lo) > 0) {
-    global_correction <- (mean(fref_sub[idx_hi]) - mean(fref_sub[idx_lo])) / (a - b)
-  } else {
-    global_correction <- 0
-  }
-
-  raw_slope - global_correction
+  mean(all_estimates)
 }
 
 
