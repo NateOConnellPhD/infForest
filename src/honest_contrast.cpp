@@ -62,9 +62,9 @@ List honest_all(
 
     // Accumulators — per-observation (for obs_mean output)
     std::vector<std::vector<double>> bin_sum(n_bin, std::vector<double>(n, 0.0));
-    std::vector<std::vector<int>> bin_cnt(n_bin, std::vector<int>(n, 0));
+    std::vector<std::vector<double>> bin_cnt(n_bin, std::vector<double>(n, 0.0));
     std::vector<std::vector<double>> cont_sum(n_cont, std::vector<double>(n, 0.0));
-    std::vector<std::vector<int>> cont_cnt(n_cont, std::vector<int>(n, 0));
+    std::vector<std::vector<double>> cont_cnt(n_cont, std::vector<double>(n, 0.0));
 
     // Forest-wide weighted sums for popavg — each unique contrast contributes once per tree
     std::vector<double> bin_global_wsum(n_bin, 0.0);
@@ -137,34 +137,34 @@ List honest_all(
                 }
             }
 
-            // Compute contrasts and region sizes
+            // Compute contrasts and inverse-variance weights
             std::unordered_map<int, double> c1_c, c2_c;
-            std::unordered_map<int, int> c1_n, c2_n;
+            std::unordered_map<int, double> c1_w, c2_w;  // harmonic weights
             for (auto& kv : c1_sums) {
                 auto& s = kv.second;
                 if (s.n1 > 0 && s.n0 > 0) {
                     c1_c[kv.first] = s.s1 / s.n1 - s.s0 / s.n0;
-                    c1_n[kv.first] = s.n1 + s.n0;
+                    c1_w[kv.first] = (double)(s.n1 * s.n0) / (double)(s.n1 + s.n0);
                 }
             }
             for (auto& kv : c2_sums) {
                 auto& s = kv.second;
                 if (s.n1 > 0 && s.n0 > 0) {
                     c2_c[kv.first] = s.s1 / s.n1 - s.s0 / s.n0;
-                    c2_n[kv.first] = s.n1 + s.n0;
+                    c2_w[kv.first] = (double)(s.n1 * s.n0) / (double)(s.n1 + s.n0);
                 }
             }
 
             // Accumulate into forest-wide popavg — each contrast once
             for (auto& kv : c1_c) {
-                int nr = c1_n[kv.first];
-                bin_global_wsum[v] += kv.second * nr;
-                bin_global_wcnt[v] += nr;
+                double w = c1_w[kv.first];
+                bin_global_wsum[v] += kv.second * w;
+                bin_global_wcnt[v] += w;
             }
             for (auto& kv : c2_c) {
-                int nr = c2_n[kv.first];
-                bin_global_wsum[v] += kv.second * nr;
-                bin_global_wcnt[v] += nr;
+                double w = c2_w[kv.first];
+                bin_global_wsum[v] += kv.second * w;
+                bin_global_wcnt[v] += w;
             }
 
             // Assign to obs — for per-observation output
@@ -172,17 +172,17 @@ List honest_all(
                 int anc = x6_anc[leaf_id[i]];
                 bool found = false;
                 double contrast = 0.0;
-                int n_region = 0;
+                double w_region = 0.0;
                 if (anc >= 0) {
                     auto it = c1_c.find(anc);
-                    if (it != c1_c.end()) { contrast = it->second; n_region = c1_n[anc]; found = true; }
+                    if (it != c1_c.end()) { contrast = it->second; w_region = c1_w[anc]; found = true; }
                 } else {
                     auto it = c2_c.find(leaf_id[i]);
-                    if (it != c2_c.end()) { contrast = it->second; n_region = c2_n[leaf_id[i]]; found = true; }
+                    if (it != c2_c.end()) { contrast = it->second; w_region = c2_w[leaf_id[i]]; found = true; }
                 }
                 if (found) {
-                    bin_sum[v][i] += contrast * n_region;
-                    bin_cnt[v][i] += n_region;
+                    bin_sum[v][i] += contrast * w_region;
+                    bin_cnt[v][i] += w_region;
                 }
             }
         }
@@ -244,20 +244,21 @@ List honest_all(
 
             // Compute contrasts and region sizes: per-leaf slope if per_leaf_denom, raw Y diff otherwise
             std::unordered_map<int, double> c1_c, c2_c;
-            std::unordered_map<int, int> c1_n, c2_n;
+            std::unordered_map<int, double> c1_w, c2_w;  // harmonic weights
             for (auto& kv : c1_sums) {
                 auto& s = kv.second;
                 if (s.nhi > 0 && s.nlo > 0) {
                     double y_diff = s.sy_hi / s.nhi - s.sy_lo / s.nlo;
+                    double w = (double)(s.nhi * s.nlo) / (double)(s.nhi + s.nlo);
                     if (per_leaf_denom) {
                         double x_gap = s.sx_hi / s.nhi - s.sx_lo / s.nlo;
                         if (std::abs(x_gap) > 1e-10) {
                             c1_c[kv.first] = y_diff / x_gap;
-                            c1_n[kv.first] = s.nhi + s.nlo;
+                            c1_w[kv.first] = w;
                         }
                     } else {
                         c1_c[kv.first] = y_diff;
-                        c1_n[kv.first] = s.nhi + s.nlo;
+                        c1_w[kv.first] = w;
                     }
                 }
             }
@@ -265,29 +266,30 @@ List honest_all(
                 auto& s = kv.second;
                 if (s.nhi > 0 && s.nlo > 0) {
                     double y_diff = s.sy_hi / s.nhi - s.sy_lo / s.nlo;
+                    double w = (double)(s.nhi * s.nlo) / (double)(s.nhi + s.nlo);
                     if (per_leaf_denom) {
                         double x_gap = s.sx_hi / s.nhi - s.sx_lo / s.nlo;
                         if (std::abs(x_gap) > 1e-10) {
                             c2_c[kv.first] = y_diff / x_gap;
-                            c2_n[kv.first] = s.nhi + s.nlo;
+                            c2_w[kv.first] = w;
                         }
                     } else {
                         c2_c[kv.first] = y_diff;
-                        c2_n[kv.first] = s.nhi + s.nlo;
+                        c2_w[kv.first] = w;
                     }
                 }
             }
 
             // Accumulate into forest-wide popavg — each contrast once
             for (auto& kv : c1_c) {
-                int nr = c1_n[kv.first];
-                cont_global_wsum[m] += kv.second * nr;
-                cont_global_wcnt[m] += nr;
+                double w = c1_w[kv.first];
+                cont_global_wsum[m] += kv.second * w;
+                cont_global_wcnt[m] += w;
             }
             for (auto& kv : c2_c) {
-                int nr = c2_n[kv.first];
-                cont_global_wsum[m] += kv.second * nr;
-                cont_global_wcnt[m] += nr;
+                double w = c2_w[kv.first];
+                cont_global_wsum[m] += kv.second * w;
+                cont_global_wcnt[m] += w;
             }
 
             // Assign to obs — for per-observation output
@@ -295,17 +297,17 @@ List honest_all(
                 int anc = xk_anc[leaf_id[i]];
                 bool found = false;
                 double contrast = 0.0;
-                int n_region = 0;
+                double w_region = 0.0;
                 if (anc >= 0) {
                     auto it = c1_c.find(anc);
-                    if (it != c1_c.end()) { contrast = it->second; n_region = c1_n[anc]; found = true; }
+                    if (it != c1_c.end()) { contrast = it->second; w_region = c1_w[anc]; found = true; }
                 } else {
                     auto it = c2_c.find(leaf_id[i]);
-                    if (it != c2_c.end()) { contrast = it->second; n_region = c2_n[leaf_id[i]]; found = true; }
+                    if (it != c2_c.end()) { contrast = it->second; w_region = c2_w[leaf_id[i]]; found = true; }
                 }
                 if (found) {
-                    cont_sum[m][i] += contrast * n_region;
-                    cont_cnt[m][i] += n_region;
+                    cont_sum[m][i] += contrast * w_region;
+                    cont_cnt[m][i] += w_region;
                 }
             }
         }
@@ -314,7 +316,7 @@ List honest_all(
 
     // Build output
     auto build_out = [&](int nv, std::vector<std::vector<double>>& sums,
-                         std::vector<std::vector<int>>& counts,
+                         std::vector<std::vector<double>>& counts,
                          std::vector<double>& gwsum, std::vector<double>& gwcnt) {
         NumericVector pa(nv);
         List om_list(nv);
@@ -396,7 +398,7 @@ List honest_curve(
 
     // Accumulators: per-obs, per-grid-interval
     std::vector<std::vector<double>> slope_sum(G, std::vector<double>(n, 0.0));
-    std::vector<std::vector<int>> slope_cnt(G, std::vector<int>(n, 0));
+    std::vector<std::vector<double>> slope_cnt(G, std::vector<double>(n, 0.0));
 
     // Forest-wide weighted sums for popavg slopes
     std::vector<double> slope_global_wsum(G, 0.0);
@@ -471,25 +473,25 @@ List honest_curve(
                 else            { s.sy_lo += yi; s.sx_lo += xi; s.nlo++; }
             }
 
-            // Compute per-region slopes and sizes
+            // Compute per-region slopes and harmonic weights
             std::unordered_map<int, double> region_slopes;
-            std::unordered_map<int, int> region_sizes;
+            std::unordered_map<int, double> region_weights;
             for (auto& kv : region_sums) {
                 auto& s = kv.second;
                 if (s.nhi > 0 && s.nlo > 0) {
                     double x_gap = s.sx_hi / s.nhi - s.sx_lo / s.nlo;
                     if (std::abs(x_gap) > 1e-10) {
                         region_slopes[kv.first] = (s.sy_hi / s.nhi - s.sy_lo / s.nlo) / x_gap;
-                        region_sizes[kv.first] = s.nhi + s.nlo;
+                        region_weights[kv.first] = (double)(s.nhi * s.nlo) / (double)(s.nhi + s.nlo);
                     }
                 }
             }
 
             // Accumulate into forest-wide popavg — each contrast once
             for (auto& kv : region_slopes) {
-                int nr = region_sizes[kv.first];
-                slope_global_wsum[g] += kv.second * nr;
-                slope_global_wcnt[g] += nr;
+                double w = region_weights[kv.first];
+                slope_global_wsum[g] += kv.second * w;
+                slope_global_wcnt[g] += w;
             }
 
             // Assign to obs — for per-observation output
@@ -498,9 +500,9 @@ List honest_curve(
                 int region_key = (anc >= 0) ? anc : -(leaf_id[i] + 1);
                 auto it = region_slopes.find(region_key);
                 if (it != region_slopes.end()) {
-                    int n_region = region_sizes[region_key];
-                    slope_sum[g][i] += it->second * n_region;
-                    slope_cnt[g][i] += n_region;
+                    double w = region_weights[region_key];
+                    slope_sum[g][i] += it->second * w;
+                    slope_cnt[g][i] += w;
                 }
             }
         }
@@ -578,7 +580,7 @@ List honest_interaction_2x2(
     }
 
     std::vector<double> obs_sum(n, 0.0);
-    std::vector<int> obs_cnt(n, 0);
+    std::vector<double> obs_cnt(n, 0.0);
 
     // Forest-wide weighted sum for popavg
     double int_global_wsum = 0.0;
@@ -639,7 +641,7 @@ List honest_interaction_2x2(
         //   = mean(x2 | x2 >= thresh, in leaf) - mean(x2 | x2 < thresh, in leaf)
         //   pooled across both x6 groups
         std::unordered_map<int, double> leaf_int;
-        std::unordered_map<int, int> leaf_int_n;
+        std::unordered_map<int, double> leaf_int_w;
         for (auto& kv : leaf_cells) {
             auto& c = kv.second;
             if (c.n11 > 0 && c.n10 > 0 && c.n01 > 0 && c.n00 > 0) {
@@ -654,25 +656,27 @@ List honest_interaction_2x2(
                 double x_gap = sx_hi_total / n_hi_total - sx_lo_total / n_lo_total;
                 if (std::abs(x_gap) > 1e-10) {
                     leaf_int[kv.first] = raw_int / x_gap;
-                    leaf_int_n[kv.first] = c.n11 + c.n10 + c.n01 + c.n00;
+                    // Inverse-variance weight: 1/(1/n11 + 1/n10 + 1/n01 + 1/n00)
+                    double inv_w = 1.0/c.n11 + 1.0/c.n10 + 1.0/c.n01 + 1.0/c.n00;
+                    leaf_int_w[kv.first] = 1.0 / inv_w;
                 }
             }
         }
 
         // Accumulate into forest-wide popavg — each contrast once
         for (auto& kv : leaf_int) {
-            int nr = leaf_int_n[kv.first];
-            int_global_wsum += kv.second * nr;
-            int_global_wcnt += nr;
+            double w = leaf_int_w[kv.first];
+            int_global_wsum += kv.second * w;
+            int_global_wcnt += w;
         }
 
         // Assign to obs — for per-observation output
         for (int i = 0; i < n; i++) {
             auto it = leaf_int.find(leaf_id[i]);
             if (it != leaf_int.end()) {
-                int n_region = leaf_int_n[leaf_id[i]];
-                obs_sum[i] += it->second * n_region;
-                obs_cnt[i] += n_region;
+                double w = leaf_int_w[leaf_id[i]];
+                obs_sum[i] += it->second * w;
+                obs_cnt[i] += w;
             }
         }
     }
