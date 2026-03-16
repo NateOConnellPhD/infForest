@@ -208,9 +208,6 @@ int <- function(...) interaction(...)
 #' @keywords internal
 .effect_within_subset <- function(object, var, subset_idx, at, type,
                                    bw, q_lo, q_hi) {
-  # Compute effect of var using only observations in subset_idx for
-  # honest estimation (conditioning on the by-variable)
-
   focal_type <- detect_var_type(object$X[[var]])
 
   if (focal_type == "binary") {
@@ -228,7 +225,6 @@ int <- function(...) interaction(...)
   a <- at_vals[length(at_vals)]
   b <- at_vals[1]
 
-  # Build grid spanning the contrast points
   grid_lo <- min(a, b, unname(quantile(x_var, q_lo)))
   grid_hi <- max(a, b, unname(quantile(x_var, q_hi)))
 
@@ -237,18 +233,20 @@ int <- function(...) interaction(...)
   for (r in seq_along(object$forests)) {
     fs <- object$forests[[r]]
 
-    # Intersect subset with honest fold
     hon_AB <- intersect(fs$idxB, subset_idx)
     hon_BA <- intersect(fs$idxA, subset_idx)
+
+    Y_resid_AB <- .residualize_Y(object$X, object$Y, fs$idxA, hon_AB, var)
+    Y_resid_BA <- .residualize_Y(object$X, object$Y, fs$idxB, hon_BA, var)
 
     n_honest_sub <- length(hon_AB)
     n_intervals <- max(1L, as.integer(n_honest_sub / bw))
     grid <- seq(grid_lo, grid_hi, length.out = n_intervals + 1)
 
-    slopes_AB <- .extract_curve_slopes(fs$rfA, object$X, object$Y,
+    slopes_AB <- .extract_curve_slopes(fs$rfA, object$X, Y_resid_AB,
                                         honest_idx = hon_AB, var = var,
                                         grid = grid)
-    slopes_BA <- .extract_curve_slopes(fs$rfB, object$X, object$Y,
+    slopes_BA <- .extract_curve_slopes(fs$rfB, object$X, Y_resid_BA,
                                         honest_idx = hon_BA, var = var,
                                         grid = grid)
     avg_slopes <- (slopes_AB + slopes_BA) / 2
@@ -260,32 +258,7 @@ int <- function(...) interaction(...)
     all_estimates[r] <- (val_a - val_b) / (a - b)
   }
 
-  raw_slope <- mean(all_estimates)
-
-  # Global augmentation correction for continuous
-  mid_ref <- (a + b) / 2
-  X_ref <- object$X; X_ref[[var]] <- mid_ref
-  all_pred_ref <- numeric(nrow(object$X))
-  n_forests <- 0
-  for (r in seq_along(object$forests)) {
-    fs <- object$forests[[r]]
-    all_pred_ref <- all_pred_ref + .get_pred_vector(fs$rfA, X_ref)
-    all_pred_ref <- all_pred_ref + .get_pred_vector(fs$rfB, X_ref)
-    n_forests <- n_forests + 2
-  }
-  all_pred_ref <- all_pred_ref / n_forests
-
-  x_sub <- x_var[subset_idx]
-  fref_sub <- all_pred_ref[subset_idx]
-  idx_hi <- x_sub >= a
-  idx_lo <- x_sub <= b
-  if (sum(idx_hi) > 0 && sum(idx_lo) > 0) {
-    cont_correction <- (mean(fref_sub[idx_hi]) - mean(fref_sub[idx_lo])) / (a - b)
-  } else {
-    cont_correction <- 0
-  }
-
-  raw_slope - cont_correction
+  mean(all_estimates)
 }
 
 
@@ -299,9 +272,12 @@ int <- function(...) interaction(...)
     hon_AB <- intersect(fs$idxB, subset_idx)
     hon_BA <- intersect(fs$idxA, subset_idx)
 
-    est_AB <- .extract_binary_one_direction(fs$rfA, object$X, object$Y,
+    Y_resid_AB <- .residualize_Y(object$X, object$Y, fs$idxA, hon_AB, var)
+    Y_resid_BA <- .residualize_Y(object$X, object$Y, fs$idxB, hon_BA, var)
+
+    est_AB <- .extract_binary_one_direction(fs$rfA, object$X, Y_resid_AB,
                                              honest_idx = hon_AB, var = var)
-    est_BA <- .extract_binary_one_direction(fs$rfB, object$X, object$Y,
+    est_BA <- .extract_binary_one_direction(fs$rfB, object$X, Y_resid_BA,
                                              honest_idx = hon_BA, var = var)
     all_estimates[r] <- (est_AB + est_BA) / 2
   }

@@ -69,3 +69,26 @@ reorder_X_to_ranger <- function(X, rf) {
   }
   as.numeric(p)
 }
+
+#' Residualize Y by fitting a leave-variable-out forest on the build fold
+#' Returns a Y vector where honest observations have h_hat subtracted
+#' @keywords internal
+.residualize_Y <- function(X, Y, build_idx, honest_idx, var) {
+  # Fit leave-var-out forest on build fold
+  X_minus_j <- X[, setdiff(names(X), var), drop = FALSE]
+  dat_build <- X_minus_j[build_idx, , drop = FALSE]
+  dat_build$y <- as.numeric(Y[build_idx])
+
+  rf_minus_j <- ranger::ranger(y ~ ., data = dat_build, num.trees = 500,
+                                mtry = min(5L, ncol(dat_build) - 1),
+                                min.node.size = 5, seed = 42)
+
+  # Predict at ALL observations' X_{-j} values
+  h_hat <- predict(rf_minus_j, data = X_minus_j)$predictions
+
+  # Residualize: Y_resid = Y - h_hat for honest obs
+  Y_resid <- as.numeric(Y)
+  Y_resid[honest_idx] <- Y_resid[honest_idx] - h_hat[honest_idx]
+
+  Y_resid
+}

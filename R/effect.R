@@ -119,31 +119,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     contrasts_df$lo[k] <- at_labels[i_lo]
     contrasts_df$hi_val[k] <- at_vals[i_hi]
     contrasts_df$lo_val[k] <- at_vals[i_lo]
-    raw_slope <- (val_hi - val_lo) / (at_vals[i_hi] - at_vals[i_lo])
-
-    # Global augmentation correction for continuous
-    mid_ref <- (at_vals[i_hi] + at_vals[i_lo]) / 2
-    X_ref <- object$X; X_ref[[var]] <- mid_ref
-    all_pred_ref <- numeric(nrow(object$X))
-    n_forests <- 0
-    for (r in seq_along(object$forests)) {
-      fs <- object$forests[[r]]
-      all_pred_ref <- all_pred_ref + .get_pred_vector(fs$rfA, X_ref)
-      all_pred_ref <- all_pred_ref + .get_pred_vector(fs$rfB, X_ref)
-      n_forests <- n_forests + 2
-    }
-    all_pred_ref <- all_pred_ref / n_forests
-
-    idx_hi <- x_var >= at_vals[i_hi]
-    idx_lo <- x_var <= at_vals[i_lo]
-    if (sum(idx_hi) > 0 && sum(idx_lo) > 0) {
-      cont_correction <- (mean(all_pred_ref[idx_hi]) - mean(all_pred_ref[idx_lo])) /
-                          (at_vals[i_hi] - at_vals[i_lo])
-    } else {
-      cont_correction <- 0
-    }
-
-    contrasts_df$estimate[k] <- raw_slope - cont_correction
+    contrasts_df$estimate[k] <- (val_hi - val_lo) / (at_vals[i_hi] - at_vals[i_lo])
   }
 
   out <- list(
@@ -170,9 +146,13 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     fs <- object$forests[[r]]
     hon_B <- if (!is.null(subset)) intersect(fs$idxB, subset) else fs$idxB
     hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
-    est_AB <- .extract_binary_one_direction(fs$rfA, object$X, object$Y,
+
+    Y_resid_AB <- .residualize_Y(object$X, object$Y, fs$idxA, hon_B, var)
+    Y_resid_BA <- .residualize_Y(object$X, object$Y, fs$idxB, hon_A, var)
+
+    est_AB <- .extract_binary_one_direction(fs$rfA, object$X, Y_resid_AB,
                                              honest_idx = hon_B, var = var)
-    est_BA <- .extract_binary_one_direction(fs$rfB, object$X, object$Y,
+    est_BA <- .extract_binary_one_direction(fs$rfB, object$X, Y_resid_BA,
                                              honest_idx = hon_A, var = var)
     all_estimates[r] <- (est_AB + est_BA) / 2
   }
@@ -193,10 +173,14 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     fs <- object$forests[[r]]
     hon_B <- if (!is.null(subset)) intersect(fs$idxB, subset) else fs$idxB
     hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
-    slopes_AB <- .extract_curve_slopes(fs$rfA, object$X, object$Y,
+
+    Y_resid_AB <- .residualize_Y(object$X, object$Y, fs$idxA, hon_B, var)
+    Y_resid_BA <- .residualize_Y(object$X, object$Y, fs$idxB, hon_A, var)
+
+    slopes_AB <- .extract_curve_slopes(fs$rfA, object$X, Y_resid_AB,
                                        honest_idx = hon_B, var = var,
                                        grid = grid)
-    slopes_BA <- .extract_curve_slopes(fs$rfB, object$X, object$Y,
+    slopes_BA <- .extract_curve_slopes(fs$rfB, object$X, Y_resid_BA,
                                        honest_idx = hon_A, var = var,
                                        grid = grid)
     all_slopes[r, ] <- (slopes_AB + slopes_BA) / 2
@@ -219,11 +203,6 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   y_hon <- rep(NA_real_, n)
   y_hon[honest_idx] <- as.numeric(Y[honest_idx])
 
-  # Precompute forest-wide non-X_j prediction (X_j set to 0 for all)
-  X_ref0 <- X; X_ref0[[var]] <- 0
-  pred_ref <- .get_pred_vector(rf, X_ref0)
-
-  # Raw contrast
   res <- honest_all(
     rf$forest, X_ord, y_hon, as.integer(honest_idx),
     bin_cols = as.integer(col_idx),
@@ -232,64 +211,17 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     per_leaf_denom = TRUE
   )
 
-  raw_popavg <- res$binary$popavg[1]
-
-  # Global augmentation: use ALL observations (imbalance is a property of X, not the fold)
-  x_vals <- X[[var]]
-  fref_vals <- pred_ref
-  idx1 <- x_vals > 0.5
-  idx0 <- !idx1
-  if (sum(idx1) > 0 && sum(idx0) > 0) {
-    fref_mean_1 <- mean(fref_vals[idx1])
-    fref_mean_0 <- mean(fref_vals[idx0])
-    global_correction <- fref_mean_1 - fref_mean_0
-  } else {
-    fref_mean_1 <- NA; fref_mean_0 <- NA
-    global_correction <- 0
-  }
-
-  raw_popavg - global_correction
+  res$binary$popavg[1]
 }
 
 
 #' @keywords internal
 .extract_binary_multi_one_direction <- function(rf, X, Y, honest_idx, vars) {
-  X_ord <- reorder_X_to_ranger(X, rf)
-  col_idxs <- vapply(vars, function(v) get_ranger_col_idx(rf, v), integer(1))
-
-  n <- nrow(X)
-  y_hon <- rep(NA_real_, n)
-  y_hon[honest_idx] <- as.numeric(Y[honest_idx])
-
-  # Raw contrasts (no within-leaf augmentation)
-  res <- honest_all(
-    rf$forest, X_ord, y_hon, as.integer(honest_idx),
-    bin_cols = as.integer(col_idxs),
-    cont_cols = as.integer(integer(0)),
-    cont_thresh = numeric(0),
-    per_leaf_denom = TRUE
-  )
-
-  raw <- res$binary$popavg
-
-  # Global augmentation for each binary variable
+  # Each variable needs its own residualization, so call single path
   out <- numeric(length(vars))
   for (j in seq_along(vars)) {
-    X_ref0 <- X; X_ref0[[vars[j]]] <- 0
-    pred_ref <- .get_pred_vector(rf, X_ref0)
-
-    x_vals <- X[[vars[j]]]
-    fref_vals <- pred_ref
-    idx1 <- x_vals > 0.5
-    idx0 <- !idx1
-    if (sum(idx1) > 0 && sum(idx0) > 0) {
-      global_correction <- mean(fref_vals[idx1]) - mean(fref_vals[idx0])
-    } else {
-      global_correction <- 0
-    }
-    out[j] <- raw[j] - global_correction
+    out[j] <- .extract_binary_one_direction(rf, X, Y, honest_idx, vars[j])
   }
-
   names(out) <- vars
   out
 }
@@ -297,17 +229,22 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 
 #' @keywords internal
 .honest_effect_binary_multi <- function(object, vars) {
-  # Estimate multiple binary effects in one pass per forest
   all_estimates <- matrix(0, nrow = object$honesty.splits, ncol = length(vars))
   colnames(all_estimates) <- vars
 
   for (r in seq_along(object$forests)) {
     fs <- object$forests[[r]]
-    est_AB <- .extract_binary_multi_one_direction(fs$rfA, object$X, object$Y,
-                                                   honest_idx = fs$idxB, vars = vars)
-    est_BA <- .extract_binary_multi_one_direction(fs$rfB, object$X, object$Y,
-                                                   honest_idx = fs$idxA, vars = vars)
-    all_estimates[r, ] <- (est_AB + est_BA) / 2
+
+    for (j in seq_along(vars)) {
+      Y_resid_AB <- .residualize_Y(object$X, object$Y, fs$idxA, fs$idxB, vars[j])
+      Y_resid_BA <- .residualize_Y(object$X, object$Y, fs$idxB, fs$idxA, vars[j])
+
+      est_AB <- .extract_binary_one_direction(fs$rfA, object$X, Y_resid_AB,
+                                               honest_idx = fs$idxB, var = vars[j])
+      est_BA <- .extract_binary_one_direction(fs$rfB, object$X, Y_resid_BA,
+                                               honest_idx = fs$idxA, var = vars[j])
+      all_estimates[r, j] <- (est_AB + est_BA) / 2
+    }
   }
 
   colMeans(all_estimates)
