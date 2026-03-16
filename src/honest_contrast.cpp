@@ -113,29 +113,39 @@ List honest_all(
             leaf_id[i] = node;
         }
 
-        // === BINARY CONTRASTS: Honest Counterfactual Routing + Augmentation ===
+        // === BINARY CONTRASTS: Conditional Leaf Means + Counterfactual Routing ===
         //
-        // Step 1: Compute honest leaf means for this tree
-        std::unordered_map<int, double> h_leaf_ysum;
-        std::unordered_map<int, int> h_leaf_ycnt;
-        for (int i = 0; i < n; i++) {
-            if (!is_honest[i]) continue;
-            double yi = y_ptr[i];
-            if (ISNA(yi)) continue;
-            h_leaf_ysum[leaf_id[i]] += yi;
-            h_leaf_ycnt[leaf_id[i]]++;
-        }
-        std::unordered_map<int, double> h_leaf_mean;
-        for (auto& kv : h_leaf_ycnt) {
-            if (kv.second > 0)
-                h_leaf_mean[kv.first] = h_leaf_ysum[kv.first] / kv.second;
-        }
+        // For each binary variable X_j, compute conditional honest leaf means:
+        //   Y_mean(L | x_j=1) and Y_mean(L | x_j=0) for every leaf L.
+        // Then for each obs: route factual and counterfactual, extract
+        // the group-specific conditional mean from each leaf.
 
         for (int v = 0; v < n_bin; v++) {
             int col = bcols[v];
 
+            // Step 1: Compute conditional leaf means by X_j group
+            // Also compute conditional fhat_ref means for augmentation
+            struct LeafCond {
+                double sy1=0, sy0=0;
+                double sf1=0, sf0=0;  // fhat_ref sums
+                int n1=0, n0=0;
+            };
+            std::unordered_map<int, LeafCond> leaf_cond;
+
+            for (int i = 0; i < n; i++) {
+                if (!is_honest[i]) continue;
+                double yi = y_ptr[i];
+                if (ISNA(yi)) continue;
+                double xi = X_ptr[i + n * col];
+                double fi = (have_bin_aug) ? bfr0_ptr[i + n * v] : 0.0;
+                auto& lc_s = leaf_cond[leaf_id[i]];
+                if (xi > 0.5) { lc_s.sy1 += yi; lc_s.sf1 += fi; lc_s.n1++; }
+                else           { lc_s.sy0 += yi; lc_s.sf0 += fi; lc_s.n0++; }
+            }
+
             // Step 2: Route each honest obs with X_j flipped to find counterfactual leaf
-            std::vector<int> leaf_cf(n, -1);
+            // Then extract conditional leaf means from both leaves
+
             for (int i = 0; i < n; i++) {
                 if (!is_honest[i]) continue;
                 double yi = y_ptr[i];
@@ -143,112 +153,53 @@ List honest_all(
                 double xi = X_ptr[i + n * col];
                 double xi_flip = (xi > 0.5) ? 0.0 : 1.0;
 
-                int node = 0;
-                while (lc[node] != 0 || rc[node] != 0) {
-                    double xval = (sv[node] == col) ? xi_flip : X_ptr[i + n * sv[node]];
-                    node = (xval <= sval[node]) ? lc[node] : rc[node];
+                // Counterfactual leaf
+                int node_cf = 0;
+                while (lc[node_cf] != 0 || rc[node_cf] != 0) {
+                    double xval = (sv[node_cf] == col) ? xi_flip : X_ptr[i + n * sv[node_cf]];
+                    node_cf = (xval <= sval[node_cf]) ? lc[node_cf] : rc[node_cf];
                 }
-                leaf_cf[i] = node;
-            }
 
-            // Step 3: Compute honest leaf means of fhat_ref_0 for augmentation
-            // fhat_ref_0(X_i) = forest prediction with X_j=0 — same reference for all obs
-            // The leaf-mean difference captures non-X_j covariate imbalance between leaves
-            std::unordered_map<int, double> leaf_fref_sum;
-            std::unordered_map<int, int> leaf_fref_cnt;
-            if (have_bin_aug) {
-                for (int i = 0; i < n; i++) {
-                    if (!is_honest[i]) continue;
-                    double yi = y_ptr[i];
-                    if (ISNA(yi)) continue;
-                    leaf_fref_sum[leaf_id[i]] += bfr0_ptr[i + n * v];
-                    leaf_fref_cnt[leaf_id[i]]++;
-                }
-            }
+                int leaf_fact = leaf_id[i];
+                int leaf_cf_i = node_cf;
 
-            // Step 4: Process Case 1 (L' ≠ L) and accumulate Case 2 (L' = L)
-            struct LeafSums {
-                double s1=0, s0=0, aug1=0, aug0=0;
-                int n1=0, n0=0;
-            };
-            std::unordered_map<int, LeafSums> c2_sums;
-
-            for (int i = 0; i < n; i++) {
-                if (leaf_cf[i] < 0) continue;  // not honest or NA
-                double yi = y_ptr[i];
-                double xi = X_ptr[i + n * col];
-
-                if (leaf_cf[i] != leaf_id[i]) {
-                    // Case 1: counterfactual routing — different leaves
-                    auto it_cf = h_leaf_mean.find(leaf_cf[i]);
-                    auto it_act = h_leaf_mean.find(leaf_id[i]);
-                    if (it_cf != h_leaf_mean.end() && it_act != h_leaf_mean.end()) {
-                        // Raw: honest_mean(X_j=1 leaf) - honest_mean(X_j=0 leaf)
-                        double raw;
-                        if (xi > 0.5) {
-                            raw = it_act->second - it_cf->second;
-                        } else {
-                            raw = it_cf->second - it_act->second;
-                        }
-
-                        // Augmentation: leaf-mean difference of fhat_ref_0
-                        // This captures non-X_j covariate imbalance between the two leaves
-                        double correction = 0.0;
-                        if (have_bin_aug) {
-                            int leaf_hi, leaf_lo;
-                            if (xi > 0.5) { leaf_hi = leaf_id[i]; leaf_lo = leaf_cf[i]; }
-                            else           { leaf_hi = leaf_cf[i]; leaf_lo = leaf_id[i]; }
-                            double fref_hi = leaf_fref_sum[leaf_hi] / (double)leaf_fref_cnt[leaf_hi];
-                            double fref_lo = leaf_fref_sum[leaf_lo] / (double)leaf_fref_cnt[leaf_lo];
-                            correction = fref_hi - fref_lo;
-                        }
-
-                        double contrast = raw - correction;
-
-                        // Obs-level accumulation: equal weight per tree
-                        bin_sum[v][i] += contrast;
-                        bin_cnt[v][i] += 1.0;
-                        bin_global_wsum[v] += contrast;
-                        bin_global_wcnt[v] += 1.0;
-                    }
+                // Determine which leaf has the x_j=1 group and which has x_j=0
+                int leaf_hi, leaf_lo;  // hi = leaf containing x_j=1 conditional mean
+                if (xi > 0.5) {
+                    leaf_hi = leaf_fact;  // obs has x_j=1, factual leaf
+                    leaf_lo = leaf_cf_i;  // counterfactual leaf (x_j=0 side)
                 } else {
-                    // Case 2: same leaf — accumulate for within-leaf contrast
-                    double aug_i = 0.0;
-                    if (have_bin_aug) {
-                        aug_i = bfr0_ptr[i + n * v];
-                    }
-                    auto& s = c2_sums[leaf_id[i]];
-                    if (xi > 0.5) { s.s1 += yi; s.aug1 += aug_i; s.n1++; }
-                    else           { s.s0 += yi; s.aug0 += aug_i; s.n0++; }
+                    leaf_hi = leaf_cf_i;  // counterfactual leaf (x_j=1 side)
+                    leaf_lo = leaf_fact;  // obs has x_j=0, factual leaf
                 }
-            }
 
-            // Step 4: Compute Case 2 augmented contrasts
-            std::unordered_map<int, double> c2_contrast;
+                // Get conditional means from each leaf
+                auto it_hi = leaf_cond.find(leaf_hi);
+                auto it_lo = leaf_cond.find(leaf_lo);
+                if (it_hi == leaf_cond.end() || it_lo == leaf_cond.end()) continue;
 
-            for (auto& kv : c2_sums) {
-                auto& s = kv.second;
-                if (s.n1 > 0 && s.n0 > 0) {
-                    double raw = s.s1 / s.n1 - s.s0 / s.n0;
-                    double correction = 0.0;
-                    if (have_bin_aug) {
-                        correction = s.aug1 / s.n1 - s.aug0 / s.n0;
-                    }
-                    c2_contrast[kv.first] = raw - correction;
+                // Need x_j=1 obs in leaf_hi AND x_j=0 obs in leaf_lo
+                if (it_hi->second.n1 == 0 || it_lo->second.n0 == 0) continue;
+
+                double y_mean_hi = it_hi->second.sy1 / it_hi->second.n1;
+                double y_mean_lo = it_lo->second.sy0 / it_lo->second.n0;
+                double raw = y_mean_hi - y_mean_lo;
+
+                // Augmentation correction
+                double correction = 0.0;
+                if (have_bin_aug) {
+                    double f_mean_hi = it_hi->second.sf1 / it_hi->second.n1;
+                    double f_mean_lo = it_lo->second.sf0 / it_lo->second.n0;
+                    correction = f_mean_hi - f_mean_lo;
                 }
-            }
 
-            // Assign Case 2 contrasts to observations (equal weight per tree)
-            for (int i = 0; i < n; i++) {
-                if (leaf_cf[i] < 0) continue;
-                if (leaf_cf[i] != leaf_id[i]) continue;  // Case 1 already done
-                auto it = c2_contrast.find(leaf_id[i]);
-                if (it != c2_contrast.end()) {
-                    bin_sum[v][i] += it->second;
-                    bin_cnt[v][i] += 1.0;
-                    bin_global_wsum[v] += it->second;
-                    bin_global_wcnt[v] += 1.0;
-                }
+                double contrast = raw - correction;
+
+                // Equal weight per tree for this observation
+                bin_sum[v][i] += contrast;
+                bin_cnt[v][i] += 1.0;
+                bin_global_wsum[v] += contrast;
+                bin_global_wcnt[v] += 1.0;
             }
         }
 
