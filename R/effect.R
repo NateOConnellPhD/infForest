@@ -210,9 +210,9 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 
   raw_popavg <- res$binary$popavg[1]
 
-  # Global augmentation
-  x_vals <- X[[var]][honest_idx]
-  fref_vals <- pred_ref[honest_idx]
+  # Global augmentation: use ALL observations (imbalance is a property of X, not the fold)
+  x_vals <- X[[var]]
+  fref_vals <- pred_ref
   idx1 <- x_vals > 0.5
   idx0 <- !idx1
   if (sum(idx1) > 0 && sum(idx0) > 0) {
@@ -257,8 +257,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     X_ref0 <- X; X_ref0[[vars[j]]] <- 0
     pred_ref <- predict(rf, data = X_ref0)$predictions
 
-    x_vals <- X[[vars[j]]][honest_idx]
-    fref_vals <- pred_ref[honest_idx]
+    x_vals <- X[[vars[j]]]
+    fref_vals <- pred_ref
     idx1 <- x_vals > 0.5
     idx0 <- !idx1
     if (sum(idx1) > 0 && sum(idx0) > 0) {
