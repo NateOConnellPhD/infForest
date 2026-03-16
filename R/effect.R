@@ -119,7 +119,31 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     contrasts_df$lo[k] <- at_labels[i_lo]
     contrasts_df$hi_val[k] <- at_vals[i_hi]
     contrasts_df$lo_val[k] <- at_vals[i_lo]
-    contrasts_df$estimate[k] <- (val_hi - val_lo) / (at_vals[i_hi] - at_vals[i_lo])
+    raw_slope <- (val_hi - val_lo) / (at_vals[i_hi] - at_vals[i_lo])
+
+    # Global augmentation correction for continuous
+    mid_ref <- (at_vals[i_hi] + at_vals[i_lo]) / 2
+    X_ref <- object$X; X_ref[[var]] <- mid_ref
+    all_pred_ref <- numeric(nrow(object$X))
+    n_forests <- 0
+    for (r in seq_along(object$forests)) {
+      fs <- object$forests[[r]]
+      all_pred_ref <- all_pred_ref + .get_pred_vector(fs$rfA, X_ref)
+      all_pred_ref <- all_pred_ref + .get_pred_vector(fs$rfB, X_ref)
+      n_forests <- n_forests + 2
+    }
+    all_pred_ref <- all_pred_ref / n_forests
+
+    idx_hi <- x_var >= at_vals[i_hi]
+    idx_lo <- x_var <= at_vals[i_lo]
+    if (sum(idx_hi) > 0 && sum(idx_lo) > 0) {
+      cont_correction <- (mean(all_pred_ref[idx_hi]) - mean(all_pred_ref[idx_lo])) /
+                          (at_vals[i_hi] - at_vals[i_lo])
+    } else {
+      cont_correction <- 0
+    }
+
+    contrasts_df$estimate[k] <- raw_slope - cont_correction
   }
 
   out <- list(

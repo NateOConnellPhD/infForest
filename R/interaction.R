@@ -260,7 +260,32 @@ int <- function(...) interaction(...)
     all_estimates[r] <- (val_a - val_b) / (a - b)
   }
 
-  mean(all_estimates)
+  raw_slope <- mean(all_estimates)
+
+  # Global augmentation correction for continuous
+  mid_ref <- (a + b) / 2
+  X_ref <- object$X; X_ref[[var]] <- mid_ref
+  all_pred_ref <- numeric(nrow(object$X))
+  n_forests <- 0
+  for (r in seq_along(object$forests)) {
+    fs <- object$forests[[r]]
+    all_pred_ref <- all_pred_ref + .get_pred_vector(fs$rfA, X_ref)
+    all_pred_ref <- all_pred_ref + .get_pred_vector(fs$rfB, X_ref)
+    n_forests <- n_forests + 2
+  }
+  all_pred_ref <- all_pred_ref / n_forests
+
+  x_sub <- x_var[subset_idx]
+  fref_sub <- all_pred_ref[subset_idx]
+  idx_hi <- x_sub >= a
+  idx_lo <- x_sub <= b
+  if (sum(idx_hi) > 0 && sum(idx_lo) > 0) {
+    cont_correction <- (mean(fref_sub[idx_hi]) - mean(fref_sub[idx_lo])) / (a - b)
+  } else {
+    cont_correction <- 0
+  }
+
+  raw_slope - cont_correction
 }
 
 
