@@ -11,8 +11,8 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // honest_all
-List honest_all(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, IntegerVector bin_cols, IntegerVector cont_cols, NumericVector cont_thresh, bool per_leaf_denom, SEXP bin_fhat_ref_0, SEXP bin_fhat_ref_1, SEXP cont_fhat_ref);
-RcppExport SEXP _infForest_honest_all(SEXP forestSEXP, SEXP X_numSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP bin_colsSEXP, SEXP cont_colsSEXP, SEXP cont_threshSEXP, SEXP per_leaf_denomSEXP, SEXP bin_fhat_ref_0SEXP, SEXP bin_fhat_ref_1SEXP, SEXP cont_fhat_refSEXP) {
+List honest_all(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, IntegerVector bin_cols, IntegerVector cont_cols, NumericVector cont_thresh, bool per_leaf_denom, SEXP cont_fhat_ref);
+RcppExport SEXP _infForest_honest_all(SEXP forestSEXP, SEXP X_numSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP bin_colsSEXP, SEXP cont_colsSEXP, SEXP cont_threshSEXP, SEXP per_leaf_denomSEXP, SEXP cont_fhat_refSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -24,10 +24,8 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< IntegerVector >::type cont_cols(cont_colsSEXP);
     Rcpp::traits::input_parameter< NumericVector >::type cont_thresh(cont_threshSEXP);
     Rcpp::traits::input_parameter< bool >::type per_leaf_denom(per_leaf_denomSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type bin_fhat_ref_0(bin_fhat_ref_0SEXP);
-    Rcpp::traits::input_parameter< SEXP >::type bin_fhat_ref_1(bin_fhat_ref_1SEXP);
     Rcpp::traits::input_parameter< SEXP >::type cont_fhat_ref(cont_fhat_refSEXP);
-    rcpp_result_gen = Rcpp::wrap(honest_all(forest, X_num, y_honest, honest_idx, bin_cols, cont_cols, cont_thresh, per_leaf_denom, bin_fhat_ref_0, bin_fhat_ref_1, cont_fhat_ref));
+    rcpp_result_gen = Rcpp::wrap(honest_all(forest, X_num, y_honest, honest_idx, bin_cols, cont_cols, cont_thresh, per_leaf_denom, cont_fhat_ref));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -69,7 +67,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_infForest_honest_all", (DL_FUNC) &_infForest_honest_all, 11},
+    {"_infForest_honest_all", (DL_FUNC) &_infForest_honest_all, 9},
     {"_infForest_honest_curve", (DL_FUNC) &_infForest_honest_curve, 9},
     {"_infForest_honest_interaction_2x2", (DL_FUNC) &_infForest_honest_interaction_2x2, 7},
     {NULL, NULL, 0}

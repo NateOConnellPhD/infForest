@@ -195,26 +195,34 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   y_hon <- rep(NA_real_, n)
   y_hon[honest_idx] <- as.numeric(Y[honest_idx])
 
-  # Precompute forest-wide augmentation predictions
+  # Precompute forest-wide non-X_j prediction (X_j set to 0 for all)
   X_ref0 <- X; X_ref0[[var]] <- 0
-  X_ref1 <- X; X_ref1[[var]] <- 1
-  pred0 <- predict(rf, data = X_ref0)$predictions
-  pred1 <- predict(rf, data = X_ref1)$predictions
+  pred_ref <- predict(rf, data = X_ref0)$predictions
 
-  bfr0 <- matrix(pred0, ncol = 1)
-  bfr1 <- matrix(pred1, ncol = 1)
-
+  # Raw contrast (no within-leaf augmentation needed — apply global correction)
   res <- honest_all(
     rf$forest, X_ord, y_hon, as.integer(honest_idx),
     bin_cols = as.integer(col_idx),
     cont_cols = as.integer(integer(0)),
     cont_thresh = numeric(0),
-    per_leaf_denom = TRUE,
-    bin_fhat_ref_0 = bfr0,
-    bin_fhat_ref_1 = bfr1
+    per_leaf_denom = TRUE
   )
 
-  res$binary$popavg[1]
+  raw_popavg <- res$binary$popavg[1]
+
+  # Global augmentation: subtract population-level non-X_j imbalance
+  # among honest observations only
+  x_vals <- X[[var]][honest_idx]
+  fref_vals <- pred_ref[honest_idx]
+  idx1 <- x_vals > 0.5
+  idx0 <- !idx1
+  if (sum(idx1) > 0 && sum(idx0) > 0) {
+    global_correction <- mean(fref_vals[idx1]) - mean(fref_vals[idx0])
+  } else {
+    global_correction <- 0
+  }
+
+  raw_popavg - global_correction
 }
 
 
@@ -227,29 +235,35 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   y_hon <- rep(NA_real_, n)
   y_hon[honest_idx] <- as.numeric(Y[honest_idx])
 
-  # Precompute augmentation for each binary variable
-  n_bin <- length(vars)
-  bfr0 <- matrix(0, nrow = n, ncol = n_bin)
-  bfr1 <- matrix(0, nrow = n, ncol = n_bin)
-
-  for (j in seq_along(vars)) {
-    X_ref0 <- X; X_ref0[[vars[j]]] <- 0
-    X_ref1 <- X; X_ref1[[vars[j]]] <- 1
-    bfr0[, j] <- predict(rf, data = X_ref0)$predictions
-    bfr1[, j] <- predict(rf, data = X_ref1)$predictions
-  }
-
+  # Raw contrasts (no within-leaf augmentation)
   res <- honest_all(
     rf$forest, X_ord, y_hon, as.integer(honest_idx),
     bin_cols = as.integer(col_idxs),
     cont_cols = as.integer(integer(0)),
     cont_thresh = numeric(0),
-    per_leaf_denom = TRUE,
-    bin_fhat_ref_0 = bfr0,
-    bin_fhat_ref_1 = bfr1
+    per_leaf_denom = TRUE
   )
 
-  out <- res$binary$popavg
+  raw <- res$binary$popavg
+
+  # Global augmentation for each binary variable
+  out <- numeric(length(vars))
+  for (j in seq_along(vars)) {
+    X_ref0 <- X; X_ref0[[vars[j]]] <- 0
+    pred_ref <- predict(rf, data = X_ref0)$predictions
+
+    x_vals <- X[[vars[j]]][honest_idx]
+    fref_vals <- pred_ref[honest_idx]
+    idx1 <- x_vals > 0.5
+    idx0 <- !idx1
+    if (sum(idx1) > 0 && sum(idx0) > 0) {
+      global_correction <- mean(fref_vals[idx1]) - mean(fref_vals[idx0])
+    } else {
+      global_correction <- 0
+    }
+    out[j] <- raw[j] - global_correction
+  }
+
   names(out) <- vars
   out
 }
