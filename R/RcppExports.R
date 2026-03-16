@@ -2,14 +2,14 @@
 # Generator token: 10BE3573-1514-4C36-9D1C-5A225CD40393
 
 honest_all <- function(forest, X_num, y_honest, honest_idx, bin_cols, cont_cols, cont_thresh, per_leaf_denom = TRUE) {
-    .Call('_infForest_honest_all', PACKAGE = 'infForest', forest, X_num, y_honest, honest_idx, bin_cols, cont_cols, cont_thresh, per_leaf_denom)
+    .Call(`_infForest_honest_all`, forest, X_num, y_honest, honest_idx, bin_cols, cont_cols, cont_thresh, per_leaf_denom)
 }
 
 honest_curve <- function(forest, X_num, y_honest, honest_idx, col, midpoints, window_lo, window_hi) {
-    .Call('_infForest_honest_curve', PACKAGE = 'infForest', forest, X_num, y_honest, honest_idx, col, midpoints, window_lo, window_hi)
+    .Call(`_infForest_honest_curve`, forest, X_num, y_honest, honest_idx, col, midpoints, window_lo, window_hi)
 }
 
 honest_interaction_2x2 <- function(forest, X_num, y_honest, honest_idx, bin_col, cont_col, cont_thresh) {
-    .Call('_infForest_honest_interaction_2x2', PACKAGE = 'infForest', forest, X_num, y_honest, honest_idx, bin_col, cont_col, cont_thresh)
+    .Call(`_infForest_honest_interaction_2x2`, forest, X_num, y_honest, honest_idx, bin_col, cont_col, cont_thresh)
 }
 
