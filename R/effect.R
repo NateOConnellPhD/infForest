@@ -93,8 +93,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   grid_hi <- max(at_vals, unname(quantile(x_var, q_hi)))
 
   curve_result <- .honest_build_curve(object, var, grid_lo, grid_hi,
-                                      n_honest = n_honest, bw = bw,
-                                      subset = subset)
+                                       n_honest = n_honest, bw = bw,
+                                       subset = subset)
 
   # Extract all pairwise contrasts (hi > lo)
   n_at <- length(at_vals)
@@ -110,6 +110,35 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     stringsAsFactors = FALSE
   )
 
+  # Global augmentation correction for continuous variables
+  # Predict with X_j at median (reference), compare groups defined by at_vals
+  global_corrections <- numeric(n_pairs)
+  for (k in seq_len(n_pairs)) {
+    i_lo <- pairs[1, k]
+    i_hi <- pairs[2, k]
+    val_lo_k <- at_vals[i_lo]
+    val_hi_k <- at_vals[i_hi]
+    mid_ref <- (val_lo_k + val_hi_k) / 2
+    X_ref <- object$X; X_ref[[var]] <- mid_ref
+    # Average predictions across all forests (both directions)
+    all_pred_ref <- numeric(nrow(object$X))
+    n_forests <- 0
+    for (r in seq_along(object$forests)) {
+      fs <- object$forests[[r]]
+      all_pred_ref <- all_pred_ref + predict(fs$rfA, data = X_ref)$predictions
+      all_pred_ref <- all_pred_ref + predict(fs$rfB, data = X_ref)$predictions
+      n_forests <- n_forests + 2
+    }
+    all_pred_ref <- all_pred_ref / n_forests
+
+    idx_hi <- x_var >= val_hi_k
+    idx_lo <- x_var <= val_lo_k
+    if (sum(idx_hi) > 0 && sum(idx_lo) > 0) {
+      global_corrections[k] <- (mean(all_pred_ref[idx_hi]) - mean(all_pred_ref[idx_lo])) /
+                                (val_hi_k - val_lo_k)
+    }
+  }
+
   for (k in seq_len(n_pairs)) {
     i_lo <- pairs[1, k]
     i_hi <- pairs[2, k]
@@ -119,7 +148,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     contrasts_df$lo[k] <- at_labels[i_lo]
     contrasts_df$hi_val[k] <- at_vals[i_hi]
     contrasts_df$lo_val[k] <- at_vals[i_lo]
-    contrasts_df$estimate[k] <- (val_hi - val_lo) / (at_vals[i_hi] - at_vals[i_lo])
+    raw_slope <- (val_hi - val_lo) / (at_vals[i_hi] - at_vals[i_lo])
+    contrasts_df$estimate[k] <- raw_slope - global_corrections[k]
   }
 
   out <- list(
@@ -147,9 +177,9 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     hon_B <- if (!is.null(subset)) intersect(fs$idxB, subset) else fs$idxB
     hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
     est_AB <- .extract_binary_one_direction(fs$rfA, object$X, object$Y,
-                                            honest_idx = hon_B, var = var)
+                                             honest_idx = hon_B, var = var)
     est_BA <- .extract_binary_one_direction(fs$rfB, object$X, object$Y,
-                                            honest_idx = hon_A, var = var)
+                                             honest_idx = hon_A, var = var)
     all_estimates[r] <- (est_AB + est_BA) / 2
   }
 
@@ -224,9 +254,6 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     global_correction <- 0
   }
 
-  cat(sprintf("  [augment %s] raw=%.4f fref_mean(x=1)=%.4f fref_mean(x=0)=%.4f corr=%.4f final=%.4f\n",
-              var, raw_popavg, fref_mean_1, fref_mean_0, global_correction, raw_popavg - global_correction))
-
   raw_popavg - global_correction
 }
 
@@ -283,9 +310,9 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   for (r in seq_along(object$forests)) {
     fs <- object$forests[[r]]
     est_AB <- .extract_binary_multi_one_direction(fs$rfA, object$X, object$Y,
-                                                  honest_idx = fs$idxB, vars = vars)
+                                                   honest_idx = fs$idxB, vars = vars)
     est_BA <- .extract_binary_multi_one_direction(fs$rfB, object$X, object$Y,
-                                                  honest_idx = fs$idxA, vars = vars)
+                                                   honest_idx = fs$idxA, vars = vars)
     all_estimates[r, ] <- (est_AB + est_BA) / 2
   }
 
