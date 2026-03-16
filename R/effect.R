@@ -196,17 +196,11 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   y_hon[honest_idx] <- as.numeric(Y[honest_idx])
 
   # Precompute forest-wide augmentation predictions
-  # fhat_ref_0: predict with X_j = 0
-  # fhat_ref_1: predict with X_j = 1
-  X_ref0 <- X_ord
-  X_ref0[, col_idx + 1L] <- 0  # col_idx is 0-based, R matrix is 1-based
-  X_ref1 <- X_ord
-  X_ref1[, col_idx + 1L] <- 1
+  X_ref0 <- X; X_ref0[[var]] <- 0
+  X_ref1 <- X; X_ref1[[var]] <- 1
+  pred0 <- predict(rf, data = X_ref0)$predictions
+  pred1 <- predict(rf, data = X_ref1)$predictions
 
-  pred0 <- predict(rf, data = as.data.frame(X_ref0))$predictions
-  pred1 <- predict(rf, data = as.data.frame(X_ref1))$predictions
-
-  # Package as n x 1 matrices for C++
   bfr0 <- matrix(pred0, ncol = 1)
   bfr1 <- matrix(pred1, ncol = 1)
 
@@ -239,11 +233,10 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   bfr1 <- matrix(0, nrow = n, ncol = n_bin)
 
   for (j in seq_along(vars)) {
-    ci <- col_idxs[j] + 1L  # 1-based for R matrix
-    X_ref0 <- X_ord; X_ref0[, ci] <- 0
-    X_ref1 <- X_ord; X_ref1[, ci] <- 1
-    bfr0[, j] <- predict(rf, data = as.data.frame(X_ref0))$predictions
-    bfr1[, j] <- predict(rf, data = as.data.frame(X_ref1))$predictions
+    X_ref0 <- X; X_ref0[[vars[j]]] <- 0
+    X_ref1 <- X; X_ref1[[vars[j]]] <- 1
+    bfr0[, j] <- predict(rf, data = X_ref0)$predictions
+    bfr1[, j] <- predict(rf, data = X_ref1)$predictions
   }
 
   res <- honest_all(
