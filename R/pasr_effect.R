@@ -87,9 +87,9 @@ pasr_effect <- function(object, var, at = c(0.25, 0.75),
       hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
 
       slopes_AB <- .extract_curve_slopes(fs$rfA, X, Y, honest_idx = hon_B,
-                                          var = var, grid = grid)
+                                         var = var, grid = grid)
       slopes_BA <- .extract_curve_slopes(fs$rfB, X, Y, honest_idx = hon_A,
-                                          var = var, grid = grid)
+                                         var = var, grid = grid)
       avg_slopes <- (slopes_AB + slopes_BA) / 2
       intervals <- diff(grid)
       curve_vals <- c(0, cumsum(avg_slopes * intervals))
@@ -169,7 +169,11 @@ pasr_effect <- function(object, var, at = c(0.25, 0.75),
     # Check convergence after R_min
     if (R_current >= R_min) {
       C_current <- max(cov(psi_A, psi_B), 0)
-      rel_change <- abs(C_current - C_prev) / max(C_prev, 1e-10)
+      if (is.finite(C_prev)) {
+        rel_change <- abs(C_current - C_prev) / max(C_prev, 1e-10)
+      } else {
+        rel_change <- Inf
+      }
 
       if (verbose) {
         cat(sprintf("  PASR R=%d: C_psi=%.6f  rel_change=%.4f  stable=%d/%d\n",

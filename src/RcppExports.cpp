@@ -64,11 +64,67 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// honest_all
+List honest_all(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, IntegerVector bin_cols, IntegerVector cont_cols, NumericVector cont_thresh, bool per_leaf_denom);
+RcppExport SEXP _infForest_honest_all(SEXP forestSEXP, SEXP X_numSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP bin_colsSEXP, SEXP cont_colsSEXP, SEXP cont_threshSEXP, SEXP per_leaf_denomSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type forest(forestSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_num(X_numSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y_honest(y_honestSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type honest_idx(honest_idxSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type bin_cols(bin_colsSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type cont_cols(cont_colsSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type cont_thresh(cont_threshSEXP);
+    Rcpp::traits::input_parameter< bool >::type per_leaf_denom(per_leaf_denomSEXP);
+    rcpp_result_gen = Rcpp::wrap(honest_all(forest, X_num, y_honest, honest_idx, bin_cols, cont_cols, cont_thresh, per_leaf_denom));
+    return rcpp_result_gen;
+END_RCPP
+}
+// honest_curve
+List honest_curve(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, int col, NumericVector midpoints, NumericVector window_lo, NumericVector window_hi);
+RcppExport SEXP _infForest_honest_curve(SEXP forestSEXP, SEXP X_numSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP colSEXP, SEXP midpointsSEXP, SEXP window_loSEXP, SEXP window_hiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type forest(forestSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_num(X_numSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y_honest(y_honestSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type honest_idx(honest_idxSEXP);
+    Rcpp::traits::input_parameter< int >::type col(colSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type midpoints(midpointsSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type window_lo(window_loSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type window_hi(window_hiSEXP);
+    rcpp_result_gen = Rcpp::wrap(honest_curve(forest, X_num, y_honest, honest_idx, col, midpoints, window_lo, window_hi));
+    return rcpp_result_gen;
+END_RCPP
+}
+// honest_interaction_2x2
+List honest_interaction_2x2(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, int bin_col, int cont_col, double cont_thresh);
+RcppExport SEXP _infForest_honest_interaction_2x2(SEXP forestSEXP, SEXP X_numSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP bin_colSEXP, SEXP cont_colSEXP, SEXP cont_threshSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type forest(forestSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_num(X_numSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y_honest(y_honestSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type honest_idx(honest_idxSEXP);
+    Rcpp::traits::input_parameter< int >::type bin_col(bin_colSEXP);
+    Rcpp::traits::input_parameter< int >::type cont_col(cont_colSEXP);
+    Rcpp::traits::input_parameter< double >::type cont_thresh(cont_threshSEXP);
+    rcpp_result_gen = Rcpp::wrap(honest_interaction_2x2(forest, X_num, y_honest, honest_idx, bin_col, cont_col, cont_thresh));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_infForest_honest_predict_cpp", (DL_FUNC) &_infForest_honest_predict_cpp, 5},
     {"_infForest_aipw_scores_cpp", (DL_FUNC) &_infForest_aipw_scores_cpp, 11},
     {"_infForest_aipw_curve_cpp", (DL_FUNC) &_infForest_aipw_curve_cpp, 8},
+    {"_infForest_honest_all", (DL_FUNC) &_infForest_honest_all, 8},
+    {"_infForest_honest_curve", (DL_FUNC) &_infForest_honest_curve, 8},
+    {"_infForest_honest_interaction_2x2", (DL_FUNC) &_infForest_honest_interaction_2x2, 7},
     {NULL, NULL, 0}
 };
 

@@ -96,7 +96,7 @@ effect_curve.infForest <- function(object, var, q_lo = 0.10, q_hi = 0.90,
 #' @param ... Additional arguments (ignored).
 #' @export
 print.infForest_curve <- function(x, ...) {
-  cat("Inference Forest Effect Curve (AIPW)\n")
+  cat("Inference Forest Effect Curve\n")
   cat("  Variable:   ", x$variable, "\n")
   cat("  Grid range: ", round(min(x$grid), 3), "to", round(max(x$grid), 3), "\n")
   cat("  Reference:  ", round(x$ref, 3), "\n")

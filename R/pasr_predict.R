@@ -129,7 +129,9 @@ pasr_predict <- function(object, newdata = NULL,
         Ct_current[k] <- max(cov(psi_A_mat[k, ], psi_B_mat[k, ]), 0)
       }
 
-      rel_changes <- abs(Ct_current - Ct_prev) / pmax(Ct_prev, 1e-10)
+      rel_changes <- ifelse(is.finite(Ct_prev),
+                            abs(Ct_current - Ct_prev) / pmax(Ct_prev, 1e-10),
+                            Inf)
       med_rel_change <- median(rel_changes)
 
       if (verbose) {

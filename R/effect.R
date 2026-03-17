@@ -258,13 +258,14 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 }
 
 
-#' Build AIPW effect curve (used by both effect() and effect_curve())
+#' Build effect curve: within-leaf slopes + AIPW confounding correction
 #' @keywords internal
 .aipw_build_curve <- function(object, var, grid_lo, grid_hi, n_honest, bw,
                                subset = NULL, propensity_trees = 2000L) {
   n_intervals <- max(1L, as.integer(n_honest / bw))
   grid <- seq(grid_lo, grid_hi, length.out = n_intervals + 1)
 
+  # Propensity (fit once, reuse across splits and directions)
   prop <- .fit_propensity(object$X, var, is_binary = FALSE,
                            n_trees = propensity_trees)
 
@@ -296,10 +297,10 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 }
 
 
-#' AIPW curve slopes for one fold direction using aipw_curve_cpp
+#' Hybrid curve slopes: within-leaf working model + AIPW correction
 #' @keywords internal
 .aipw_curve_one_direction <- function(rf, X, Y, honest_idx, var, grid,
-                                       ghat, subset = NULL) {
+                                       ghat = NULL, subset = NULL) {
   X_ord <- reorder_X_to_ranger(X, rf)
   col_idx <- get_ranger_col_idx(rf, var)
 
@@ -309,27 +310,45 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   hon_use <- if (!is.null(subset)) intersect(honest_idx, subset) else honest_idx
   y_hon[hon_use] <- as.numeric(Y[hon_use])
 
-  # Build query matrices for each grid point (ranger column order)
-  X_grid_list <- vector("list", length(grid))
-  for (g in seq_along(grid)) {
-    Xg <- X_ord
-    Xg[, col_idx + 1L] <- grid[g]
-    X_grid_list[[g]] <- Xg
-  }
+  # --- Within-leaf slopes (working model) ---
+  wins <- .grid_to_windows(grid)
 
-  res <- aipw_curve_cpp(
+  res <- honest_curve(
     forest = rf$forest,
-    X_obs = X_ord,
-    X_grid_list = X_grid_list,
+    X_num = X_ord,
     y_honest = y_hon,
     honest_idx = as.integer(hon_use),
-    ghat = ghat,
-    var_col = col_idx,
-    grid_points = grid
+    col = col_idx,
+    midpoints = wins$midpts,
+    window_lo = wins$wlo,
+    window_hi = wins$whi
   )
 
-  slopes <- res$slopes
+  slopes <- res$popavg
   slopes[is.na(slopes)] <- 0
+  slopes <- as.numeric(slopes)
+
+  # --- AIPW confounding correction (constant across intervals) ---
+  if (!is.null(ghat)) {
+    # Honest prediction at observed X values
+    fhat_obs <- honest_predict_cpp(rf$forest, X_ord, X_ord, y_hon,
+                                    as.integer(hon_use))
+
+    # Propensity residual and weight
+    x_j <- X_ord[hon_use, col_idx + 1L]
+    g_h <- ghat[hon_use]
+    e_j <- x_j - g_h
+    sigma2_ej <- mean(e_j^2)
+
+    # Residual at honest obs
+    residuals <- as.numeric(Y[hon_use]) - fhat_obs[hon_use]
+
+    # Constant correction: mean of (e_j / sigma2_ej) * residual
+    correction <- mean((e_j / sigma2_ej) * residuals)
+
+    slopes <- slopes + correction
+  }
+
   slopes
 }
 
@@ -401,7 +420,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 #' @param ... Additional arguments (ignored).
 #' @export
 print.infForest_effect <- function(x, ...) {
-  cat("Inference Forest Effect Estimate (AIPW)\n")
+  cat("Inference Forest Effect Estimate\n")
   cat("  Variable:   ", x$variable, "\n")
   cat("  Type:       ", x$var_type, "\n")
 
@@ -417,8 +436,8 @@ print.infForest_effect <- function(x, ...) {
     cat("\n  Pairwise contrasts (per unit):\n")
     df <- x$contrasts
     for (k in seq_len(nrow(df))) {
-      cat(sprintf("    %s vs %s  [%.3f vs %.3f]:  %.4f\n",
-                  df$hi[k], df$lo[k], df$hi_val[k], df$lo_val[k], df$estimate[k]))
+      cat(sprintf("    %s to %s  [%.3f, %.3f]:  %.4f\n",
+                  df$lo[k], df$hi[k], df$lo_val[k], df$hi_val[k], df$estimate[k]))
     }
     if (!is.null(x$se)) {
       cat(sprintf("\n  Primary contrast SE: %.4f\n", x$se))

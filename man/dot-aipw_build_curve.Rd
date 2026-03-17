@@ -2,7 +2,7 @@
 % Please edit documentation in R/effect.R
 \name{.aipw_build_curve}
 \alias{.aipw_build_curve}
-\title{Build AIPW effect curve (used by both effect() and effect_curve())}
+\title{Build effect curve: within-leaf slopes + AIPW confounding correction}
 \usage{
 .aipw_build_curve(
   object,
@@ -16,6 +16,6 @@
 )
 }
 \description{
-Build AIPW effect curve (used by both effect() and effect_curve())
+Build effect curve: within-leaf slopes + AIPW confounding correction
 }
 \keyword{internal}
