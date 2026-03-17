@@ -212,7 +212,7 @@ par(mfrow = c(1, 1))
 ![Covariance floor diagnostic](man/figures/cov_floor_diagnostic.png)
 
 ### Prediction intervals (continuous outcome)
-
+Evaluate the observed vs predicted outcomes with PASR estiamted 95\% confidence intervals for the continuous outcome. 
 ```r
 pi_cont <- pasr_predict(fit, R_max = 50L, verbose = TRUE)
 #>   PASR R=20: median_Ct=0.106982  med_rel_change=Inf  stable=0/2
@@ -242,7 +242,7 @@ segments(pi_cont$f_hat, pi_cont$pi_lower, pi_cont$f_hat, pi_cont$pi_upper,
 ![Prediction intervals for continuous outcome](man/figures/pred_int_cont.png)
 
 ### Confidence intervals for probabilities (binary outcome)
-
+Evaluate the observed vs predicted probabilities with PASR estiamted 95\% confidence intervals. 
 ```r
 fit_bin <- infForest(y ~ ., data = dat_bin, num.trees = 3000,
                      penalize = TRUE, softmax = TRUE)
