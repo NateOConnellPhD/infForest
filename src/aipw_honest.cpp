@@ -1,14 +1,12 @@
-// aipw_honest.cpp — AIPW effect estimation in C++
+// aipw_honest.cpp — AIPW effect estimation for inference forests
 //
-// Computes honest predictions at multiple query points per tree
-// in a single pass, then assembles AIPW scores.
+// All trees contribute to all three prediction sets (fhat_a, fhat_b, fhat_obs).
+// Honest leaf means from Y_B. Residual = Y_k^B - fhat_obs(k).
+// Propensity weights from R (OOB predictions).
 //
 // For each tree:
 //   1. Route honest obs to leaves, compute leaf means (ONCE)
-//   2. Route all query sets to leaves, look up means
-//
-// This avoids re-extracting forest structure and re-routing
-// honest observations for each query set.
+//   2. Route fhat_obs, fhat_a, fhat_b query sets, look up means
 
 #include <Rcpp.h>
 #include <vector>
@@ -16,9 +14,7 @@
 using namespace Rcpp;
 
 
-// Core: honest predictions at arbitrary query points.
-// Routes honest obs ONCE per tree, looks up predictions for all query sets.
-//
+// Standalone honest prediction at arbitrary query points
 // [[Rcpp::export]]
 NumericVector honest_predict_cpp(
     List forest,
@@ -42,7 +38,6 @@ NumericVector honest_predict_cpp(
     for (int j = 0; j < honest_idx.size(); j++)
         is_honest[honest_idx[j] - 1] = true;
 
-    // Pre-extract forest
     std::vector<std::vector<int>> all_sv(B), all_lc(B), all_rc(B);
     std::vector<std::vector<double>> all_sval(B);
     for (int b = 0; b < B; b++) {
@@ -63,7 +58,6 @@ NumericVector honest_predict_cpp(
         const int* lc = all_lc[b].data();
         const int* rc = all_rc[b].data();
 
-        // Route honest obs, compute leaf means
         std::unordered_map<int, double> leaf_ysum;
         std::unordered_map<int, int> leaf_ycnt;
         for (int i = 0; i < n; i++) {
@@ -71,9 +65,8 @@ NumericVector honest_predict_cpp(
             double yi = y_ptr[i];
             if (ISNA(yi)) continue;
             int node = 0;
-            while (lc[node] != 0 || rc[node] != 0) {
+            while (lc[node] != 0 || rc[node] != 0)
                 node = (Xh_ptr[i + n * sv[node]] <= sval[node]) ? lc[node] : rc[node];
-            }
             leaf_ysum[node] += yi;
             leaf_ycnt[node]++;
         }
@@ -82,12 +75,10 @@ NumericVector honest_predict_cpp(
             if (kv.second > 0)
                 leaf_mean[kv.first] = leaf_ysum[kv.first] / kv.second;
 
-        // Route query points
         for (int q = 0; q < n_query; q++) {
             int node = 0;
-            while (lc[node] != 0 || rc[node] != 0) {
+            while (lc[node] != 0 || rc[node] != 0)
                 node = (Xq_ptr[q + n_query * sv[node]] <= sval[node]) ? lc[node] : rc[node];
-            }
             auto it = leaf_mean.find(node);
             if (it != leaf_mean.end()) {
                 pred_sum[q] += it->second;
@@ -103,19 +94,10 @@ NumericVector honest_predict_cpp(
 }
 
 
-// Full AIPW computation for one fold direction, one variable.
+// AIPW scores for one fold direction, one variable.
 //
-// Does honest routing ONCE per tree, then looks up predictions at
-// three query sets (X_a, X_b, X_obs) simultaneously.
-// Returns per-observation AIPW scores and the popavg estimate.
-//
-// For binary X_j:
-//   phi_k = (fhat_a[k] - fhat_b[k]) + weight[k] * (Y_k - fhat_obs[k])
-//   where weight[k] = (X_j[k] - ghat[k]) / (ghat[k] * (1 - ghat[k]))
-//
-// For continuous X_j:
-//   phi_k = (fhat_a[k] - fhat_b[k]) + weight[k] * (Y_k - fhat_obs[k]) * (a - b)
-//   where weight[k] = (X_j[k] - ghat[k]) / sigma2_ej
+// All trees contribute to fhat_obs, fhat_a, fhat_b.
+// Honest leaf means for all three. Residual = Y_k - fhat_obs(k).
 //
 // [[Rcpp::export]]
 List aipw_scores_cpp(
@@ -125,11 +107,11 @@ List aipw_scores_cpp(
     NumericMatrix X_query_b,   // n x p: counterfactual with X_j = b
     NumericVector y_honest,    // length n: honest outcomes (NA for non-honest)
     IntegerVector honest_idx,  // 1-indexed honest observation indices
-    NumericVector ghat,        // length n: propensity predictions for all obs
+    NumericVector ghat,        // length n: propensity predictions (OOB)
     int var_col,               // 0-indexed column of variable of interest
-    bool is_binary,            // binary vs continuous
-    double a,                  // query value high
-    double b                   // query value low
+    bool is_binary,
+    double a,
+    double b
 ) {
     List svl = forest["split.varIDs"];
     List svall = forest["split.values"];
@@ -161,10 +143,20 @@ List aipw_scores_cpp(
         all_rc[b].assign(rc_r.begin(), rc_r.end());
     }
 
-    // Accumulators for 3 query sets (only at honest obs positions)
-    // We accumulate for ALL n positions but only use honest ones
+    // Accumulators for all three prediction sets
     std::vector<double> fhat_a_sum(n, 0.0), fhat_b_sum(n, 0.0), fhat_obs_sum(n, 0.0);
     std::vector<int> fhat_a_cnt(n, 0), fhat_b_cnt(n, 0), fhat_obs_cnt(n, 0);
+
+    // Diagnostic: count trees that split on var_col
+    int n_split_trees = 0;
+    for (int b = 0; b < B; b++) {
+        for (int nd = 0; nd < (int)all_sv[b].size(); nd++) {
+            if (all_lc[b][nd] != 0 && all_sv[b][nd] == var_col) {
+                n_split_trees++;
+                break;
+            }
+        }
+    }
 
     // ========== TREE LOOP ==========
     for (int b = 0; b < B; b++) {
@@ -173,33 +165,29 @@ List aipw_scores_cpp(
         const int* lc = all_lc[b].data();
         const int* rc = all_rc[b].data();
 
-        // Step 1: Route honest obs to leaves, compute leaf means (ONCE)
+        // Route honest obs to leaves, compute honest leaf means (ONCE)
         std::unordered_map<int, double> leaf_ysum;
         std::unordered_map<int, int> leaf_ycnt;
-
         for (int i = 0; i < n; i++) {
             if (!is_honest[i]) continue;
             double yi = y_ptr[i];
             if (ISNA(yi)) continue;
             int node = 0;
-            while (lc[node] != 0 || rc[node] != 0) {
+            while (lc[node] != 0 || rc[node] != 0)
                 node = (Xobs_ptr[i + n * sv[node]] <= sval[node]) ? lc[node] : rc[node];
-            }
             leaf_ysum[node] += yi;
             leaf_ycnt[node]++;
         }
-
         std::unordered_map<int, double> leaf_mean;
         for (auto& kv : leaf_ycnt)
             if (kv.second > 0)
                 leaf_mean[kv.first] = leaf_ysum[kv.first] / kv.second;
 
-        // Step 2: Route all 3 query sets, look up honest leaf means
-        // Only need predictions at honest obs positions
+        // Route all three query sets for ALL trees
         for (int j = 0; j < n_hon; j++) {
             int i = honest_idx[j] - 1;
 
-            // fhat_obs: route with actual covariates
+            // fhat_obs
             {
                 int node = 0;
                 while (lc[node] != 0 || rc[node] != 0)
@@ -208,7 +196,7 @@ List aipw_scores_cpp(
                 if (it != leaf_mean.end()) { fhat_obs_sum[i] += it->second; fhat_obs_cnt[i]++; }
             }
 
-            // fhat_a: route with X_j = a
+            // fhat_a
             {
                 int node = 0;
                 while (lc[node] != 0 || rc[node] != 0)
@@ -217,7 +205,7 @@ List aipw_scores_cpp(
                 if (it != leaf_mean.end()) { fhat_a_sum[i] += it->second; fhat_a_cnt[i]++; }
             }
 
-            // fhat_b: route with X_j = b
+            // fhat_b
             {
                 int node = 0;
                 while (lc[node] != 0 || rc[node] != 0)
@@ -234,7 +222,6 @@ List aipw_scores_cpp(
     double psi_sum = 0.0;
     int psi_cnt = 0;
 
-    // For continuous: precompute sigma2_ej
     double sigma2_ej = 0.0;
     if (!is_binary) {
         double ss = 0.0;
@@ -268,7 +255,6 @@ List aipw_scores_cpp(
 
         double weight, correction;
         if (is_binary) {
-            // Clip propensity
             double gi_clip = std::max(0.025, std::min(0.975, gi));
             weight = (xj - gi_clip) / (gi_clip * (1.0 - gi_clip));
             correction = weight * residual;
@@ -292,25 +278,24 @@ List aipw_scores_cpp(
         Named("phi") = phi,
         Named("mean_pred_contrast") = (psi_cnt > 0) ? sum_pred_contrast / psi_cnt : NA_REAL,
         Named("mean_correction") = (psi_cnt > 0) ? sum_correction / psi_cnt : NA_REAL,
-        Named("n_contributing") = psi_cnt
+        Named("n_contributing") = psi_cnt,
+        Named("n_split_trees") = n_split_trees,
+        Named("n_trees") = B
     );
 }
 
 
-// Batched version for effect curves: predict at G+1 grid points
-// in a single tree loop pass.
-//
-// Returns per-interval AIPW slopes and the popavg curve.
+// AIPW effect curves: predict at G+1 grid points + fhat_obs in a single tree loop.
 //
 // [[Rcpp::export]]
 List aipw_curve_cpp(
     List forest,
-    NumericMatrix X_obs,       // n x p: actual covariates
-    List X_grid_list,          // List of G+1 matrices (n x p), X with X_j at each grid point
+    NumericMatrix X_obs,
+    List X_grid_list,          // List of G+1 matrices (n x p)
     NumericVector y_honest,
     IntegerVector honest_idx,
-    NumericVector ghat,        // propensity predictions
-    int var_col,               // 0-indexed
+    NumericVector ghat,
+    int var_col,
     NumericVector grid_points  // G+1 grid values
 ) {
     List svl = forest["split.varIDs"];
@@ -349,12 +334,22 @@ List aipw_curve_cpp(
         Xg_ptrs[g] = REAL(Xg);
     }
 
-    // Accumulators: fhat at actual X and at each grid point, for honest obs only
+    // Accumulators
     std::vector<double> fhat_obs_sum(n, 0.0);
     std::vector<int> fhat_obs_cnt(n, 0);
-    // Grid predictions: G+1 x n (only honest positions used)
     std::vector<std::vector<double>> fhat_grid_sum(G_plus_1, std::vector<double>(n, 0.0));
     std::vector<std::vector<int>> fhat_grid_cnt(G_plus_1, std::vector<int>(n, 0));
+
+    // Diagnostic
+    int n_split_trees = 0;
+    for (int b = 0; b < B; b++) {
+        for (int nd = 0; nd < (int)all_sv[b].size(); nd++) {
+            if (all_lc[b][nd] != 0 && all_sv[b][nd] == var_col) {
+                n_split_trees++;
+                break;
+            }
+        }
+    }
 
     // ========== TREE LOOP ==========
     for (int b = 0; b < B; b++) {
@@ -363,7 +358,7 @@ List aipw_curve_cpp(
         const int* lc = all_lc[b].data();
         const int* rc = all_rc[b].data();
 
-        // Route honest obs, compute leaf means (ONCE per tree)
+        // Route honest obs, compute leaf means (ONCE)
         std::unordered_map<int, double> leaf_ysum;
         std::unordered_map<int, int> leaf_ycnt;
         for (int i = 0; i < n; i++) {
@@ -381,7 +376,7 @@ List aipw_curve_cpp(
             if (kv.second > 0)
                 leaf_mean[kv.first] = leaf_ysum[kv.first] / kv.second;
 
-        // Route honest obs for fhat_obs and all grid predictions
+        // Route fhat_obs and all grid points
         for (int j = 0; j < n_hon; j++) {
             int i = honest_idx[j] - 1;
 
@@ -394,7 +389,7 @@ List aipw_curve_cpp(
                 if (it != leaf_mean.end()) { fhat_obs_sum[i] += it->second; fhat_obs_cnt[i]++; }
             }
 
-            // fhat at each grid point
+            // Grid points
             for (int g = 0; g < G_plus_1; g++) {
                 const double* Xg = Xg_ptrs[g];
                 int node = 0;
@@ -410,7 +405,7 @@ List aipw_curve_cpp(
     }
     // ========== END TREE LOOP ==========
 
-    // Compute sigma2_ej for propensity weighting
+    // sigma2_ej
     double ss = 0.0;
     for (int j = 0; j < n_hon; j++) {
         int i = honest_idx[j] - 1;
@@ -421,7 +416,7 @@ List aipw_curve_cpp(
 
     // Compute AIPW slopes at each interval
     NumericVector slopes(G);
-    NumericVector pred_slopes(G);  // diagnostic: raw prediction slopes
+    NumericVector pred_slopes(G);
 
     for (int g = 0; g < G; g++) {
         double delta_g = grid_points[g + 1] - grid_points[g];
@@ -469,6 +464,8 @@ List aipw_curve_cpp(
         Named("curve") = curve,
         Named("grid") = grid_points,
         Named("sigma2_ej") = sigma2_ej,
-        Named("n_hon") = n_hon
+        Named("n_hon") = n_hon,
+        Named("n_split_trees") = n_split_trees,
+        Named("n_trees") = B
     );
 }

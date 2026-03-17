@@ -160,7 +160,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
       mtry = max(1L, floor(sqrt(ncol(X_minus_j)))),
       replace = TRUE
     )
-    ghat <- predict(prop_rf, data = data.frame(X_minus_j))$predictions[, 2]
+    # OOB predictions: each obs predicted by trees that excluded it
+    ghat <- prop_rf$predictions[, 2]
     ghat <- pmax(pmin(ghat, 0.975), 0.025)
   } else {
     df_prop <- data.frame(xj = x_j, X_minus_j)
@@ -171,7 +172,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
       mtry = max(1L, floor(sqrt(ncol(X_minus_j)))),
       replace = TRUE
     )
-    ghat <- predict(prop_rf, data = data.frame(X_minus_j))$predictions
+    # OOB predictions: prevents propensity overfitting
+    ghat <- prop_rf$predictions
   }
 
   list(rf = prop_rf, ghat = ghat)
