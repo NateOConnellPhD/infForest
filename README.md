@@ -369,21 +369,21 @@ The covariance floor $C_T(x)$ captures irreducible dependence between trees shar
 
 ## Theoretical foundation
 
-O'Connell, N.S. (2025). Random Forests as Statistical Procedures: Design, Variance, and Dependence. *arXiv:2602.13104*. [[paper]](https://arxiv.org/abs/2602.13104)
+O'Connell, N.S. (2026). Random Forests as Statistical Procedures: Design, Variance, and Dependence. *arXiv:2602.13104*. [[paper]](https://arxiv.org/abs/2602.13104)
 
-O'Connell, N.S. (2025). Inference Forests: A Framework for Nonparametric Inference. *In preparation*.
+O'Connell, N.S. (2026). Inference Forests: A Framework for Nonparametric Inference. *In preparation*.
 
 ## Citation
 
 ```bibtex
-@article{oconnell2025rf,
+@article{oconnell2026rf,
   title={Random Forests as Statistical Procedures: Design, Variance, and Dependence},
   author={O'Connell, Nathaniel S.},
   journal={arXiv preprint arXiv:2602.13104},
   year={2025}
 }
 
-@article{oconnell2025infforest,
+@article{oconnell2026infforest,
   title={Inference Forests: A Framework for Nonparametric Inference},
   author={O'Connell, Nathaniel S.},
   year={2025}
