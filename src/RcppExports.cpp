@@ -10,64 +10,65 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
-// honest_all
-List honest_all(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, IntegerVector bin_cols, IntegerVector cont_cols, NumericVector cont_thresh, bool per_leaf_denom);
-RcppExport SEXP _infForest_honest_all(SEXP forestSEXP, SEXP X_numSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP bin_colsSEXP, SEXP cont_colsSEXP, SEXP cont_threshSEXP, SEXP per_leaf_denomSEXP) {
+// honest_predict_cpp
+NumericVector honest_predict_cpp(List forest, NumericMatrix X_query, NumericMatrix X_honest, NumericVector y_honest, IntegerVector honest_idx);
+RcppExport SEXP _infForest_honest_predict_cpp(SEXP forestSEXP, SEXP X_querySEXP, SEXP X_honestSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< List >::type forest(forestSEXP);
-    Rcpp::traits::input_parameter< NumericMatrix >::type X_num(X_numSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_query(X_querySEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_honest(X_honestSEXP);
     Rcpp::traits::input_parameter< NumericVector >::type y_honest(y_honestSEXP);
     Rcpp::traits::input_parameter< IntegerVector >::type honest_idx(honest_idxSEXP);
-    Rcpp::traits::input_parameter< IntegerVector >::type bin_cols(bin_colsSEXP);
-    Rcpp::traits::input_parameter< IntegerVector >::type cont_cols(cont_colsSEXP);
-    Rcpp::traits::input_parameter< NumericVector >::type cont_thresh(cont_threshSEXP);
-    Rcpp::traits::input_parameter< bool >::type per_leaf_denom(per_leaf_denomSEXP);
-    rcpp_result_gen = Rcpp::wrap(honest_all(forest, X_num, y_honest, honest_idx, bin_cols, cont_cols, cont_thresh, per_leaf_denom));
+    rcpp_result_gen = Rcpp::wrap(honest_predict_cpp(forest, X_query, X_honest, y_honest, honest_idx));
     return rcpp_result_gen;
 END_RCPP
 }
-// honest_curve
-List honest_curve(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, int col, NumericVector midpoints, NumericVector window_lo, NumericVector window_hi);
-RcppExport SEXP _infForest_honest_curve(SEXP forestSEXP, SEXP X_numSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP colSEXP, SEXP midpointsSEXP, SEXP window_loSEXP, SEXP window_hiSEXP) {
+// aipw_scores_cpp
+List aipw_scores_cpp(List forest, NumericMatrix X_obs, NumericMatrix X_query_a, NumericMatrix X_query_b, NumericVector y_honest, IntegerVector honest_idx, NumericVector ghat, int var_col, bool is_binary, double a, double b);
+RcppExport SEXP _infForest_aipw_scores_cpp(SEXP forestSEXP, SEXP X_obsSEXP, SEXP X_query_aSEXP, SEXP X_query_bSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP ghatSEXP, SEXP var_colSEXP, SEXP is_binarySEXP, SEXP aSEXP, SEXP bSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< List >::type forest(forestSEXP);
-    Rcpp::traits::input_parameter< NumericMatrix >::type X_num(X_numSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_obs(X_obsSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_query_a(X_query_aSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_query_b(X_query_bSEXP);
     Rcpp::traits::input_parameter< NumericVector >::type y_honest(y_honestSEXP);
     Rcpp::traits::input_parameter< IntegerVector >::type honest_idx(honest_idxSEXP);
-    Rcpp::traits::input_parameter< int >::type col(colSEXP);
-    Rcpp::traits::input_parameter< NumericVector >::type midpoints(midpointsSEXP);
-    Rcpp::traits::input_parameter< NumericVector >::type window_lo(window_loSEXP);
-    Rcpp::traits::input_parameter< NumericVector >::type window_hi(window_hiSEXP);
-    rcpp_result_gen = Rcpp::wrap(honest_curve(forest, X_num, y_honest, honest_idx, col, midpoints, window_lo, window_hi));
+    Rcpp::traits::input_parameter< NumericVector >::type ghat(ghatSEXP);
+    Rcpp::traits::input_parameter< int >::type var_col(var_colSEXP);
+    Rcpp::traits::input_parameter< bool >::type is_binary(is_binarySEXP);
+    Rcpp::traits::input_parameter< double >::type a(aSEXP);
+    Rcpp::traits::input_parameter< double >::type b(bSEXP);
+    rcpp_result_gen = Rcpp::wrap(aipw_scores_cpp(forest, X_obs, X_query_a, X_query_b, y_honest, honest_idx, ghat, var_col, is_binary, a, b));
     return rcpp_result_gen;
 END_RCPP
 }
-// honest_interaction_2x2
-List honest_interaction_2x2(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, int bin_col, int cont_col, double cont_thresh);
-RcppExport SEXP _infForest_honest_interaction_2x2(SEXP forestSEXP, SEXP X_numSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP bin_colSEXP, SEXP cont_colSEXP, SEXP cont_threshSEXP) {
+// aipw_curve_cpp
+List aipw_curve_cpp(List forest, NumericMatrix X_obs, List X_grid_list, NumericVector y_honest, IntegerVector honest_idx, NumericVector ghat, int var_col, NumericVector grid_points);
+RcppExport SEXP _infForest_aipw_curve_cpp(SEXP forestSEXP, SEXP X_obsSEXP, SEXP X_grid_listSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP ghatSEXP, SEXP var_colSEXP, SEXP grid_pointsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< List >::type forest(forestSEXP);
-    Rcpp::traits::input_parameter< NumericMatrix >::type X_num(X_numSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_obs(X_obsSEXP);
+    Rcpp::traits::input_parameter< List >::type X_grid_list(X_grid_listSEXP);
     Rcpp::traits::input_parameter< NumericVector >::type y_honest(y_honestSEXP);
     Rcpp::traits::input_parameter< IntegerVector >::type honest_idx(honest_idxSEXP);
-    Rcpp::traits::input_parameter< int >::type bin_col(bin_colSEXP);
-    Rcpp::traits::input_parameter< int >::type cont_col(cont_colSEXP);
-    Rcpp::traits::input_parameter< double >::type cont_thresh(cont_threshSEXP);
-    rcpp_result_gen = Rcpp::wrap(honest_interaction_2x2(forest, X_num, y_honest, honest_idx, bin_col, cont_col, cont_thresh));
+    Rcpp::traits::input_parameter< NumericVector >::type ghat(ghatSEXP);
+    Rcpp::traits::input_parameter< int >::type var_col(var_colSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type grid_points(grid_pointsSEXP);
+    rcpp_result_gen = Rcpp::wrap(aipw_curve_cpp(forest, X_obs, X_grid_list, y_honest, honest_idx, ghat, var_col, grid_points));
     return rcpp_result_gen;
 END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_infForest_honest_all", (DL_FUNC) &_infForest_honest_all, 8},
-    {"_infForest_honest_curve", (DL_FUNC) &_infForest_honest_curve, 8},
-    {"_infForest_honest_interaction_2x2", (DL_FUNC) &_infForest_honest_interaction_2x2, 7},
+    {"_infForest_honest_predict_cpp", (DL_FUNC) &_infForest_honest_predict_cpp, 5},
+    {"_infForest_aipw_scores_cpp", (DL_FUNC) &_infForest_aipw_scores_cpp, 11},
+    {"_infForest_aipw_curve_cpp", (DL_FUNC) &_infForest_aipw_curve_cpp, 8},
     {NULL, NULL, 0}
 };
 

@@ -1,31 +1,33 @@
 #' Estimate the Effect of a Predictor
 #'
-#' Computes population-averaged effects of a predictor using honest within-leaf
-#' contrasts. For binary predictors, returns the average difference between
+#' Computes population-averaged effects of a predictor using honest AIPW
+#' estimation. For binary predictors, returns the average difference between
 #' groups. For continuous predictors, returns per-unit slopes between all
 #' pairwise combinations of analyst-specified comparison points.
 #'
-#' @param object An \code{infForest} object fitted with \code{honesty = TRUE}.
+#' The estimator combines honest forest predictions (working model) with
+#' propensity-weighted honest residuals (debiasing correction). Double
+#' robustness ensures consistency if either the forest or propensity model
+#' is consistent. The estimator achieves the semiparametric efficiency bound.
+#'
+#' @param object An \code{infForest} object.
 #' @param var Character; name of the predictor variable.
 #' @param at Numeric vector of comparison points for continuous predictors.
 #'   Default \code{c(0.25, 0.75)}. Interpretation depends on \code{type}.
 #'   All pairwise contrasts are returned. Ignored for binary predictors.
 #' @param type How to interpret \code{at}: \code{"quantile"} (default) treats
 #'   values as quantile probabilities, \code{"value"} treats them as raw values.
-#' @param q_lo,q_hi Quantiles defining the grid bounds for local slope
-#'   estimation. Default 0.10 and 0.90.
+#' @param q_lo,q_hi Quantiles defining the grid bounds for curve-based
+#'   estimation (continuous predictors). Default 0.10 and 0.90.
 #' @param bw Bandwidth: target number of honest observations per grid interval.
 #'   Controls grid density. Default 20.
 #' @param subset Optional integer vector of observation indices to restrict
 #'   honest estimation to. The forest routing is unchanged; only the specified
-#'   observations contribute to the honest contrasts. Useful for conditional
-#'   resolution: \code{effect(fit, "x1", subset = which(dat$x3 > 0))}.
+#'   observations contribute AIPW scores. Useful for conditional resolution.
+#' @param propensity_trees Number of trees for the propensity model. Default 2000.
 #' @param ... Additional arguments (currently unused).
 #'
-#' @return For binary predictors, a list of class \code{infForest_effect} with
-#'   a single estimate. For continuous predictors, a list containing a data
-#'   frame \code{contrasts} with all pairwise comparisons (hi, lo, hi_val,
-#'   lo_val, estimate).
+#' @return A list of class \code{infForest_effect}.
 #'
 #' @examples
 #' \dontrun{
@@ -33,8 +35,6 @@
 #' effect(fit, "treatment")
 #' effect(fit, "age")
 #' effect(fit, "age", at = c(0.10, 0.50, 0.90))
-#' effect(fit, "age", at = c(50, 60, 70), type = "value")
-#' effect(fit, "xC", subset = which(dat$xS > quantile(dat$xS, 0.75)))
 #' }
 #'
 #' @export
@@ -45,22 +45,24 @@ effect <- function(object, ...) UseMethod("effect")
 effect.infForest <- function(object, var, at = c(0.25, 0.75),
                              type = c("quantile", "value"),
                              q_lo = 0.10, q_hi = 0.90,
-                             bw = 20L, subset = NULL, ...) {
+                             bw = 20L, subset = NULL,
+                             propensity_trees = 2000L, ...) {
 
   check_infForest(object)
   check_varname(object, var)
-
 
   type <- match.arg(type)
   x_var <- object$X[[var]]
   var_type <- detect_var_type(x_var)
 
   if (var_type == "binary") {
-    est <- .honest_effect_binary(object, var, subset = subset)
+    est <- .aipw_effect_binary(object, var, subset = subset,
+                                propensity_trees = propensity_trees)
     out <- list(
       variable = var,
       var_type = var_type,
-      estimate = est,
+      estimate = est$psi,
+      diagnostics = est$diagnostics,
       n_intervals = 1L,
       subset = subset
     )
@@ -88,13 +90,13 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   n_honest <- nrow(object$X) %/% 2
   n_intervals <- max(1L, as.integer(n_honest / bw))
 
-  # Grid must span all comparison points
   grid_lo <- min(at_vals, unname(quantile(x_var, q_lo)))
   grid_hi <- max(at_vals, unname(quantile(x_var, q_hi)))
 
-  curve_result <- .honest_build_curve(object, var, grid_lo, grid_hi,
-                                       n_honest = n_honest, bw = bw,
-                                       subset = subset)
+  curve_result <- .aipw_build_curve(object, var, grid_lo, grid_hi,
+                                     n_honest = n_honest, bw = bw,
+                                     subset = subset,
+                                     propensity_trees = propensity_trees)
 
   # Extract all pairwise contrasts (hi > lo)
   n_at <- length(at_vals)
@@ -138,45 +140,149 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 }
 
 
+# ============================================================
+# AIPW internals
+# ============================================================
+
+#' Fit propensity model: predict X_j from X_{-j}
 #' @keywords internal
-.honest_effect_binary <- function(object, var, subset = NULL) {
-  all_estimates <- numeric(object$honesty.splits)
+.fit_propensity <- function(X, var, is_binary, n_trees = 2000L) {
+  var_col_r <- which(names(X) == var)
+  X_minus_j <- X[, -var_col_r, drop = FALSE]
+  x_j <- X[[var]]
 
-  for (r in seq_along(object$forests)) {
-    fs <- object$forests[[r]]
-    hon_B <- if (!is.null(subset)) intersect(fs$idxB, subset) else fs$idxB
-    hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
-
-    est_AB <- .extract_binary_one_direction(fs$rfA, object$X, object$Y,
-                                             honest_idx = hon_B, var = var)
-    est_BA <- .extract_binary_one_direction(fs$rfB, object$X, object$Y,
-                                             honest_idx = hon_A, var = var)
-    all_estimates[r] <- (est_AB + est_BA) / 2
+  if (is_binary) {
+    df_prop <- data.frame(xj = factor(x_j, levels = c(0, 1)), X_minus_j)
+    prop_rf <- inf.ranger::ranger(
+      xj ~ ., data = df_prop,
+      num.trees = n_trees, probability = TRUE,
+      min.node.size = 10L,
+      mtry = max(1L, floor(sqrt(ncol(X_minus_j)))),
+      replace = TRUE
+    )
+    ghat <- predict(prop_rf, data = data.frame(X_minus_j))$predictions[, 2]
+    ghat <- pmax(pmin(ghat, 0.975), 0.025)
+  } else {
+    df_prop <- data.frame(xj = x_j, X_minus_j)
+    prop_rf <- inf.ranger::ranger(
+      xj ~ ., data = df_prop,
+      num.trees = n_trees,
+      min.node.size = 10L,
+      mtry = max(1L, floor(sqrt(ncol(X_minus_j)))),
+      replace = TRUE
+    )
+    ghat <- predict(prop_rf, data = data.frame(X_minus_j))$predictions
   }
 
-  mean(all_estimates)
+  list(rf = prop_rf, ghat = ghat)
 }
 
 
+#' AIPW scores for one fold direction using aipw_scores_cpp
 #' @keywords internal
-.honest_build_curve <- function(object, var, grid_lo, grid_hi, n_honest, bw,
-                                subset = NULL) {
+.aipw_one_direction <- function(rf, X, Y, honest_idx, var, a, b,
+                                 is_binary, ghat, subset = NULL) {
+  X_ord <- reorder_X_to_ranger(X, rf)
+  col_idx <- get_ranger_col_idx(rf, var)
+
+  n <- nrow(X)
+
+  # Honest Y vector: NA for non-honest
+  y_hon <- rep(NA_real_, n)
+  hon_use <- if (!is.null(subset)) intersect(honest_idx, subset) else honest_idx
+  y_hon[hon_use] <- as.numeric(Y[hon_use])
+
+  # Build counterfactual query matrices (ranger column order)
+  X_a <- X_ord
+  X_a[, col_idx + 1L] <- a
+
+  X_b <- X_ord
+  X_b[, col_idx + 1L] <- b
+
+  res <- aipw_scores_cpp(
+    forest = rf$forest,
+    X_obs = X_ord,
+    X_query_a = X_a,
+    X_query_b = X_b,
+    y_honest = y_hon,
+    honest_idx = as.integer(hon_use),
+    ghat = ghat,
+    var_col = col_idx,
+    is_binary = is_binary,
+    a = a,
+    b = b
+  )
+
+  res
+}
+
+
+#' Full AIPW binary effect with cross-fitting and repeated honest splits
+#' @keywords internal
+.aipw_effect_binary <- function(object, var, subset = NULL,
+                                 propensity_trees = 2000L) {
+  psi_splits <- numeric(object$honesty.splits)
+  diag_list <- vector("list", object$honesty.splits)
+
+  prop <- .fit_propensity(object$X, var, is_binary = TRUE,
+                           n_trees = propensity_trees)
+
+  for (r in seq_along(object$forests)) {
+    fs <- object$forests[[r]]
+
+    res_AB <- .aipw_one_direction(
+      rf = fs$rfA, X = object$X, Y = object$Y,
+      honest_idx = fs$idxB, var = var,
+      a = 1, b = 0, is_binary = TRUE,
+      ghat = prop$ghat, subset = subset
+    )
+
+    res_BA <- .aipw_one_direction(
+      rf = fs$rfB, X = object$X, Y = object$Y,
+      honest_idx = fs$idxA, var = var,
+      a = 1, b = 0, is_binary = TRUE,
+      ghat = prop$ghat, subset = subset
+    )
+
+    psi_splits[r] <- (res_AB$psi + res_BA$psi) / 2
+    diag_list[[r]] <- list(AB = res_AB, BA = res_BA)
+  }
+
+  list(
+    psi = mean(psi_splits),
+    per_split = psi_splits,
+    diagnostics = diag_list
+  )
+}
+
+
+#' Build AIPW effect curve (used by both effect() and effect_curve())
+#' @keywords internal
+.aipw_build_curve <- function(object, var, grid_lo, grid_hi, n_honest, bw,
+                               subset = NULL, propensity_trees = 2000L) {
   n_intervals <- max(1L, as.integer(n_honest / bw))
   grid <- seq(grid_lo, grid_hi, length.out = n_intervals + 1)
+
+  prop <- .fit_propensity(object$X, var, is_binary = FALSE,
+                           n_trees = propensity_trees)
 
   all_slopes <- matrix(0, nrow = object$honesty.splits, ncol = n_intervals)
 
   for (r in seq_along(object$forests)) {
     fs <- object$forests[[r]]
-    hon_B <- if (!is.null(subset)) intersect(fs$idxB, subset) else fs$idxB
-    hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
 
-    slopes_AB <- .extract_curve_slopes(fs$rfA, object$X, object$Y,
-                                       honest_idx = hon_B, var = var,
-                                       grid = grid)
-    slopes_BA <- .extract_curve_slopes(fs$rfB, object$X, object$Y,
-                                       honest_idx = hon_A, var = var,
-                                       grid = grid)
+    slopes_AB <- .aipw_curve_one_direction(
+      rf = fs$rfA, X = object$X, Y = object$Y,
+      honest_idx = fs$idxB, var = var,
+      grid = grid, ghat = prop$ghat, subset = subset
+    )
+
+    slopes_BA <- .aipw_curve_one_direction(
+      rf = fs$rfB, X = object$X, Y = object$Y,
+      honest_idx = fs$idxA, var = var,
+      grid = grid, ghat = prop$ghat, subset = subset
+    )
+
     all_slopes[r, ] <- (slopes_AB + slopes_BA) / 2
   }
 
@@ -188,57 +294,93 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 }
 
 
+#' AIPW curve slopes for one fold direction using aipw_curve_cpp
 #' @keywords internal
-.extract_binary_one_direction <- function(rf, X, Y, honest_idx, var) {
+.aipw_curve_one_direction <- function(rf, X, Y, honest_idx, var, grid,
+                                       ghat, subset = NULL) {
   X_ord <- reorder_X_to_ranger(X, rf)
   col_idx <- get_ranger_col_idx(rf, var)
 
   n <- nrow(X)
-  y_hon <- rep(NA_real_, n)
-  y_hon[honest_idx] <- as.numeric(Y[honest_idx])
 
-  res <- honest_all(
-    rf$forest, X_ord, y_hon, as.integer(honest_idx),
-    bin_cols = as.integer(col_idx),
-    cont_cols = as.integer(integer(0)),
-    cont_thresh = numeric(0),
-    per_leaf_denom = TRUE
+  y_hon <- rep(NA_real_, n)
+  hon_use <- if (!is.null(subset)) intersect(honest_idx, subset) else honest_idx
+  y_hon[hon_use] <- as.numeric(Y[hon_use])
+
+  # Build query matrices for each grid point (ranger column order)
+  X_grid_list <- vector("list", length(grid))
+  for (g in seq_along(grid)) {
+    Xg <- X_ord
+    Xg[, col_idx + 1L] <- grid[g]
+    X_grid_list[[g]] <- Xg
+  }
+
+  res <- aipw_curve_cpp(
+    forest = rf$forest,
+    X_obs = X_ord,
+    X_grid_list = X_grid_list,
+    y_honest = y_hon,
+    honest_idx = as.integer(hon_use),
+    ghat = ghat,
+    var_col = col_idx,
+    grid_points = grid
   )
 
-  res$binary$popavg[1]
+  slopes <- res$slopes
+  slopes[is.na(slopes)] <- 0
+  slopes
 }
 
 
+# ============================================================
+# Legacy wrappers (interaction.R calls these)
+# ============================================================
+
 #' @keywords internal
-.extract_binary_multi_one_direction <- function(rf, X, Y, honest_idx, vars) {
-  # Each variable needs its own residualization, so call single path
+.honest_effect_binary <- function(object, var, subset = NULL) {
+  .aipw_effect_binary(object, var, subset = subset)$psi
+}
+
+#' @keywords internal
+.honest_build_curve <- function(object, var, grid_lo, grid_hi, n_honest, bw,
+                                subset = NULL) {
+  .aipw_build_curve(object, var, grid_lo, grid_hi, n_honest, bw,
+                     subset = subset)
+}
+
+#' @keywords internal
+.honest_effect_binary_multi <- function(object, vars) {
   out <- numeric(length(vars))
   for (j in seq_along(vars)) {
-    out[j] <- .extract_binary_one_direction(rf, X, Y, honest_idx, vars[j])
+    out[j] <- .aipw_effect_binary(object, vars[j])$psi
   }
   names(out) <- vars
   out
 }
 
-
 #' @keywords internal
-.honest_effect_binary_multi <- function(object, vars) {
-  all_estimates <- matrix(0, nrow = object$honesty.splits, ncol = length(vars))
-  colnames(all_estimates) <- vars
-
-  for (r in seq_along(object$forests)) {
-    fs <- object$forests[[r]]
-    est_AB <- .extract_binary_multi_one_direction(fs$rfA, object$X, object$Y,
-                                                   honest_idx = fs$idxB, vars = vars)
-    est_BA <- .extract_binary_multi_one_direction(fs$rfB, object$X, object$Y,
-                                                   honest_idx = fs$idxA, vars = vars)
-    all_estimates[r, ] <- (est_AB + est_BA) / 2
-  }
-
-  colMeans(all_estimates)
+.extract_binary_one_direction <- function(rf, X, Y, honest_idx, var) {
+  X_df <- if (is.data.frame(X)) X else as.data.frame(X)
+  prop <- .fit_propensity(X_df, var, is_binary = TRUE)
+  res <- .aipw_one_direction(
+    rf = rf, X = X_df, Y = Y,
+    honest_idx = honest_idx, var = var,
+    a = 1, b = 0, is_binary = TRUE,
+    ghat = prop$ghat
+  )
+  res$psi
 }
 
-
+#' @keywords internal
+.extract_curve_slopes <- function(rf, X, Y, honest_idx, var, grid) {
+  X_df <- if (is.data.frame(X)) X else as.data.frame(X)
+  prop <- .fit_propensity(X_df, var, is_binary = FALSE)
+  .aipw_curve_one_direction(
+    rf = rf, X = X_df, Y = Y,
+    honest_idx = honest_idx, var = var,
+    grid = grid, ghat = prop$ghat
+  )
+}
 
 #' @keywords internal
 .grid_to_windows <- function(grid) {
@@ -257,7 +399,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 #' @param ... Additional arguments (ignored).
 #' @export
 print.infForest_effect <- function(x, ...) {
-  cat("Inference Forest Effect Estimate\n")
+  cat("Inference Forest Effect Estimate (AIPW)\n")
   cat("  Variable:   ", x$variable, "\n")
   cat("  Type:       ", x$var_type, "\n")
 

@@ -7,10 +7,19 @@
 \usage{
 effect_curve(object, ...)
 
-\method{effect_curve}{infForest}(object, var, q_lo = 0.1, q_hi = 0.9, bw = 20L, ref = NULL, ...)
+\method{effect_curve}{infForest}(
+  object,
+  var,
+  q_lo = 0.1,
+  q_hi = 0.9,
+  bw = 20L,
+  ref = NULL,
+  propensity_trees = 2000L,
+  ...
+)
 }
 \arguments{
-\item{object}{An \code{infForest} object fitted with \code{honesty = TRUE}.}
+\item{object}{An \code{infForest} object.}
 
 \item{...}{Additional arguments (currently unused).}
 
@@ -23,6 +32,8 @@ Controls grid density. Higher values = smoother curve. Default 20.}
 
 \item{ref}{Reference value for the curve (curve is zero at this point).
 Default: median of the variable.}
+
+\item{propensity_trees}{Number of trees for the propensity model. Default 2000.}
 }
 \value{
 A list of class \code{infForest_curve} containing:
@@ -30,17 +41,24 @@ A list of class \code{infForest_curve} containing:
   \item{variable}{Variable name.}
   \item{grid}{Grid points at which the curve is evaluated.}
   \item{curve}{Curve values (relative to reference).}
-  \item{slopes}{Per-interval local slopes.}
+  \item{slopes}{Per-interval AIPW-adjusted local slopes.}
   \item{ref}{Reference value.}
   \item{n_intervals}{Number of grid intervals used.}
 }
 }
 \description{
 Constructs the effect curve tracing how the population-averaged outcome
-varies with a continuous predictor, using honest within-leaf local slope
-estimation. The curve captures nonlinear and non-monotone relationships
-without functional form assumptions. Any contrast between two points on
-the curve recovers the effect estimate from \code{effect()}.
+varies with a continuous predictor, using honest AIPW estimation. The
+curve captures nonlinear and non-monotone relationships without functional
+form assumptions. Any contrast between two points on the curve recovers
+the effect estimate from \code{effect()}.
+}
+\details{
+The estimator combines honest forest predictions at each grid point
+(working model) with propensity-weighted honest residuals (debiasing
+correction). The propensity correction is computed once and reused across
+all grid intervals, since confounding bias is a property of the X_j-X_{-j}
+correlation structure, not of where on X_j's support you evaluate.
 }
 \examples{
 \dontrun{

@@ -16,11 +16,12 @@ effect(object, ...)
   q_hi = 0.9,
   bw = 20L,
   subset = NULL,
+  propensity_trees = 2000L,
   ...
 )
 }
 \arguments{
-\item{object}{An \code{infForest} object fitted with \code{honesty = TRUE}.}
+\item{object}{An \code{infForest} object.}
 
 \item{...}{Additional arguments (currently unused).}
 
@@ -33,28 +34,32 @@ All pairwise contrasts are returned. Ignored for binary predictors.}
 \item{type}{How to interpret \code{at}: \code{"quantile"} (default) treats
 values as quantile probabilities, \code{"value"} treats them as raw values.}
 
-\item{q_lo, q_hi}{Quantiles defining the grid bounds for local slope
-estimation. Default 0.10 and 0.90.}
+\item{q_lo, q_hi}{Quantiles defining the grid bounds for curve-based
+estimation (continuous predictors). Default 0.10 and 0.90.}
 
 \item{bw}{Bandwidth: target number of honest observations per grid interval.
 Controls grid density. Default 20.}
 
 \item{subset}{Optional integer vector of observation indices to restrict
 honest estimation to. The forest routing is unchanged; only the specified
-observations contribute to the honest contrasts. Useful for conditional
-resolution: \code{effect(fit, "x1", subset = which(dat$x3 > 0))}.}
+observations contribute AIPW scores. Useful for conditional resolution.}
+
+\item{propensity_trees}{Number of trees for the propensity model. Default 2000.}
 }
 \value{
-For binary predictors, a list of class \code{infForest_effect} with
-  a single estimate. For continuous predictors, a list containing a data
-  frame \code{contrasts} with all pairwise comparisons (hi, lo, hi_val,
-  lo_val, estimate).
+A list of class \code{infForest_effect}.
 }
 \description{
-Computes population-averaged effects of a predictor using honest within-leaf
-contrasts. For binary predictors, returns the average difference between
+Computes population-averaged effects of a predictor using honest AIPW
+estimation. For binary predictors, returns the average difference between
 groups. For continuous predictors, returns per-unit slopes between all
 pairwise combinations of analyst-specified comparison points.
+}
+\details{
+The estimator combines honest forest predictions (working model) with
+propensity-weighted honest residuals (debiasing correction). Double
+robustness ensures consistency if either the forest or propensity model
+is consistent. The estimator achieves the semiparametric efficiency bound.
 }
 \examples{
 \dontrun{
@@ -62,8 +67,6 @@ fit <- infForest(y ~ ., data = dat)
 effect(fit, "treatment")
 effect(fit, "age")
 effect(fit, "age", at = c(0.10, 0.50, 0.90))
-effect(fit, "age", at = c(50, 60, 70), type = "value")
-effect(fit, "xC", subset = which(dat$xS > quantile(dat$xS, 0.75)))
 }
 
 }
