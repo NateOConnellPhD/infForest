@@ -180,7 +180,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 }
 
 
-#' AIPW scores for one fold direction using aipw_scores_cpp
+#' Hybrid AIPW scores: within-leaf working model + propensity correction
 #' @keywords internal
 .aipw_one_direction <- function(rf, X, Y, honest_idx, var, a, b,
                                  is_binary, ghat, subset = NULL) {
@@ -194,28 +194,76 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   hon_use <- if (!is.null(subset)) intersect(honest_idx, subset) else honest_idx
   y_hon[hon_use] <- as.numeric(Y[hon_use])
 
-  # Build counterfactual query matrices (ranger column order)
-  X_a <- X_ord
-  X_a[, col_idx + 1L] <- a
+  # --- Working model: within-leaf contrast ---
+  if (is_binary) {
+    res_wl <- honest_all(
+      rf$forest, X_ord, y_hon, as.integer(hon_use),
+      bin_cols = as.integer(col_idx),
+      cont_cols = as.integer(integer(0)),
+      cont_thresh = numeric(0),
+      per_leaf_denom = TRUE
+    )
+    # Per-observation within-leaf contrast (length n, NA where no contrast)
+    tau_wl <- as.numeric(res_wl$binary$obs_mean[[1]])
+    tau_popavg_wl <- res_wl$binary$popavg[1]
+  } else {
+    # For continuous scalar contrast (a vs b), use honest_all with cont threshold
+    thresh <- (a + b) / 2
+    res_wl <- honest_all(
+      rf$forest, X_ord, y_hon, as.integer(hon_use),
+      bin_cols = as.integer(integer(0)),
+      cont_cols = as.integer(col_idx),
+      cont_thresh = thresh,
+      per_leaf_denom = TRUE
+    )
+    tau_wl <- as.numeric(res_wl$continuous$obs_mean[[1]])
+    tau_popavg_wl <- res_wl$continuous$popavg[1]
+  }
 
-  X_b <- X_ord
-  X_b[, col_idx + 1L] <- b
+  # --- Honest prediction at actual X (for residual) ---
+  fhat_obs <- honest_predict_cpp(rf$forest, X_ord, X_ord, y_hon,
+                                  as.integer(hon_use))
 
-  res <- aipw_scores_cpp(
-    forest = rf$forest,
-    X_obs = X_ord,
-    X_query_a = X_a,
-    X_query_b = X_b,
-    y_honest = y_hon,
-    honest_idx = as.integer(hon_use),
-    ghat = ghat,
-    var_col = col_idx,
-    is_binary = is_binary,
-    a = a,
-    b = b
+  # --- AIPW correction ---
+  x_j <- X_ord[hon_use, col_idx + 1L]
+  g_h <- ghat[hon_use]
+  y_h <- as.numeric(Y[hon_use])
+  fhat_h <- fhat_obs[hon_use]
+  tau_h <- tau_wl[hon_use]
+
+  residuals <- y_h - fhat_h
+
+  if (is_binary) {
+    g_h <- pmax(pmin(g_h, 0.975), 0.025)
+    weight <- (x_j - g_h) / (g_h * (1 - g_h))
+  } else {
+    e_j <- x_j - g_h
+    sigma2_ej <- mean(e_j^2)
+    weight <- e_j / sigma2_ej
+  }
+
+  correction <- weight * residuals
+
+  # AIPW score: within-leaf contrast + propensity correction
+  # For obs with NA within-leaf contrast, use correction only
+  phi <- ifelse(is.na(tau_h), correction, tau_h + correction)
+
+  # Population average
+  valid <- !is.na(phi)
+  psi <- mean(phi[valid])
+
+  # Diagnostics
+  mean_wl <- mean(tau_h[!is.na(tau_h)])
+  mean_correction <- mean(correction[valid])
+
+  list(
+    psi = psi,
+    phi = phi,
+    mean_wl_contrast = mean_wl,
+    mean_correction = mean_correction,
+    n_valid = sum(valid),
+    n_honest = length(hon_use)
   )
-
-  res
 }
 
 

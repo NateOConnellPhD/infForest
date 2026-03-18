@@ -1,12 +1,18 @@
-// honest_contrast.cpp — Honest effect estimation for inference forests
+// honest_contrast.cpp — Within-leaf honest effect estimation for inference forests
 //
-// Binary predictors: Honest counterfactual routing with conditional leaf means
-//   For each obs i in each tree: compute conditional leaf means by X_j group,
-//   route factual and counterfactual, extract group-specific means.
-//   Augmentation correction applied globally in R (not within leaves).
+// All estimation uses the within-leaf approach:
+//   For each tree, find each observation's estimation region via DFS ancestry.
+//   Trees that split on X_j: region = pooled-downstream from first X_j ancestor.
+//   Trees that don't split on X_j: region = terminal leaf.
+//   Within each region, compute group contrast with harmonic mean weighting.
+//   Every tree contributes — no observation is wasted.
 //
-// Continuous predictors: within-leaf binned contrast with augmented numerator
-//   Augmentation uses forest-wide predictions precomputed in R.
+// Binary predictors: group by X_j = 0/1 within estimation regions.
+// Continuous predictors: group by X_j above/below threshold within estimation regions.
+// Curves: group by X_j above/below each grid midpoint, windowed.
+//
+// These within-leaf contrasts serve as the working model in the AIPW estimator.
+// The propensity-weighted residual correction is applied in R, not here.
 
 #include <Rcpp.h>
 #include <vector>
@@ -85,59 +91,99 @@ List honest_all(
             leaf_id[i] = node;
         }
 
-        // === BINARY: Conditional Leaf Means + Counterfactual Routing ===
+        // === BINARY: Within-leaf contrasts by X_j group ===
+        // Uses ancestor-based estimation regions, identical logic to continuous.
+        // Trees that split on X_j: region = pooled-downstream from ancestor.
+        // Trees that don't: region = terminal leaf.
+        // Every tree contributes. Harmonic mean weighting.
         for (int v = 0; v < n_bin; v++) {
             int col = bcols[v];
 
-            // Compute conditional leaf means by X_j group
-            struct LeafCond { double sy1=0, sy0=0; int n1=0, n0=0; };
-            std::unordered_map<int, LeafCond> leaf_cond;
-
-            for (int i = 0; i < n; i++) {
-                if (!is_honest[i]) continue;
-                double yi = y_ptr[i];
-                if (ISNA(yi)) continue;
-                double xi = X_ptr[i + n * col];
-                auto& s = leaf_cond[leaf_id[i]];
-                if (xi > 0.5) { s.sy1 += yi; s.n1++; }
-                else           { s.sy0 += yi; s.n0++; }
+            // DFS: label nodes with first ancestor splitting on col
+            std::vector<int> xk_anc(n_nodes, -1);
+            {
+                struct DE { int node; int anc; };
+                std::vector<DE> stk;
+                stk.push_back({0, -1});
+                while (!stk.empty()) {
+                    auto e = stk.back(); stk.pop_back();
+                    xk_anc[e.node] = e.anc;
+                    if (lc[e.node] != 0 || rc[e.node] != 0) {
+                        if (sv[e.node] == col && e.anc < 0) {
+                            stk.push_back({lc[e.node], e.node});
+                            stk.push_back({rc[e.node], e.node});
+                        } else {
+                            stk.push_back({lc[e.node], e.anc});
+                            stk.push_back({rc[e.node], e.anc});
+                        }
+                    }
+                }
             }
 
-            // For each obs: route counterfactual, extract conditional means
+            // Accumulate Y by X_j group within estimation regions
+            // c1_sums: regions from trees that split on X_j (keyed by ancestor node)
+            // c2_sums: regions from non-splitting paths (keyed by terminal leaf)
+            struct Sums { double sy_hi=0, sy_lo=0; int nhi=0, nlo=0; };
+            std::unordered_map<int, Sums> c1_sums, c2_sums;
+
             for (int i = 0; i < n; i++) {
                 if (!is_honest[i]) continue;
                 double yi = y_ptr[i];
                 if (ISNA(yi)) continue;
                 double xi = X_ptr[i + n * col];
-                double xi_flip = (xi > 0.5) ? 0.0 : 1.0;
-
-                // Counterfactual leaf
-                int node_cf = 0;
-                while (lc[node_cf] != 0 || rc[node_cf] != 0) {
-                    double xval = (sv[node_cf] == col) ? xi_flip : X_ptr[i + n * sv[node_cf]];
-                    node_cf = (xval <= sval[node_cf]) ? lc[node_cf] : rc[node_cf];
+                int anc = xk_anc[leaf_id[i]];
+                if (anc >= 0) {
+                    auto& s = c1_sums[anc];
+                    if (xi > 0.5) { s.sy_hi += yi; s.nhi++; }
+                    else           { s.sy_lo += yi; s.nlo++; }
+                } else {
+                    auto& s = c2_sums[leaf_id[i]];
+                    if (xi > 0.5) { s.sy_hi += yi; s.nhi++; }
+                    else           { s.sy_lo += yi; s.nlo++; }
                 }
+            }
 
-                // Which leaf has x_j=1 conditional mean, which has x_j=0
-                int leaf_hi = (xi > 0.5) ? leaf_id[i] : node_cf;
-                int leaf_lo = (xi > 0.5) ? node_cf : leaf_id[i];
+            // Compute contrasts with harmonic mean weighting
+            // Binary: contrast = mean(Y|X_j=1) - mean(Y|X_j=0), no x_gap denominator
+            auto compute_contrasts_bin = [&](std::unordered_map<int, Sums>& sums_map,
+                                             std::unordered_map<int, double>& out_c,
+                                             std::unordered_map<int, double>& out_w) {
+                for (auto& kv : sums_map) {
+                    auto& s = kv.second;
+                    if (s.nhi > 0 && s.nlo > 0) {
+                        double y_diff = s.sy_hi / s.nhi - s.sy_lo / s.nlo;
+                        double w = (double)(s.nhi * s.nlo) / (double)(s.nhi + s.nlo);
+                        out_c[kv.first] = y_diff;
+                        out_w[kv.first] = w;
+                    }
+                }
+            };
 
-                auto it_hi = leaf_cond.find(leaf_hi);
-                auto it_lo = leaf_cond.find(leaf_lo);
-                if (it_hi == leaf_cond.end() || it_lo == leaf_cond.end()) continue;
-                if (it_hi->second.n1 == 0 || it_lo->second.n0 == 0) continue;
+            std::unordered_map<int, double> c1_c, c2_c, c1_w, c2_w;
+            compute_contrasts_bin(c1_sums, c1_c, c1_w);
+            compute_contrasts_bin(c2_sums, c2_c, c2_w);
 
-                double contrast = it_hi->second.sy1 / it_hi->second.n1
-                                - it_lo->second.sy0 / it_lo->second.n0;
+            // Accumulate popavg
+            for (auto& kv : c1_c) { bin_global_wsum[v] += kv.second * c1_w[kv.first]; bin_global_wcnt[v] += c1_w[kv.first]; }
+            for (auto& kv : c2_c) { bin_global_wsum[v] += kv.second * c2_w[kv.first]; bin_global_wcnt[v] += c2_w[kv.first]; }
 
-                bin_sum[v][i] += contrast;
-                bin_cnt[v][i] += 1.0;
-                bin_global_wsum[v] += contrast;
-                bin_global_wcnt[v] += 1.0;
+            // Assign to obs (all obs, not just honest — obs_mean is for all n)
+            for (int i = 0; i < n; i++) {
+                int anc = xk_anc[leaf_id[i]];
+                double contrast = 0.0, w_r = 0.0;
+                bool found = false;
+                if (anc >= 0) {
+                    auto it = c1_c.find(anc);
+                    if (it != c1_c.end()) { contrast = it->second; w_r = c1_w[anc]; found = true; }
+                } else {
+                    auto it = c2_c.find(leaf_id[i]);
+                    if (it != c2_c.end()) { contrast = it->second; w_r = c2_w[leaf_id[i]]; found = true; }
+                }
+                if (found) { bin_sum[v][i] += contrast * w_r; bin_cnt[v][i] += w_r; }
             }
         }
 
-        // === CONTINUOUS: Augmented within-leaf binned contrast ===
+        // === CONTINUOUS: Within-leaf binned contrast ===
         for (int m = 0; m < n_cont; m++) {
             int col = ccols[m];
             double thresh = cthresh[m];

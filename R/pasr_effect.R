@@ -87,9 +87,9 @@ pasr_effect <- function(object, var, at = c(0.25, 0.75),
       hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
 
       slopes_AB <- .extract_curve_slopes(fs$rfA, X, Y, honest_idx = hon_B,
-                                         var = var, grid = grid)
+                                          var = var, grid = grid)
       slopes_BA <- .extract_curve_slopes(fs$rfB, X, Y, honest_idx = hon_A,
-                                         var = var, grid = grid)
+                                          var = var, grid = grid)
       avg_slopes <- (slopes_AB + slopes_BA) / 2
       intervals <- diff(grid)
       curve_vals <- c(0, cumsum(avg_slopes * intervals))

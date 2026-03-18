@@ -2,7 +2,7 @@
 % Please edit documentation in R/effect.R
 \name{.aipw_one_direction}
 \alias{.aipw_one_direction}
-\title{AIPW scores for one fold direction using aipw_scores_cpp}
+\title{Hybrid AIPW scores: within-leaf working model + propensity correction}
 \usage{
 .aipw_one_direction(
   rf,
@@ -18,6 +18,6 @@
 )
 }
 \description{
-AIPW scores for one fold direction using aipw_scores_cpp
+Hybrid AIPW scores: within-leaf working model + propensity correction
 }
 \keyword{internal}

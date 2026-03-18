@@ -109,12 +109,9 @@ plot.infForest_ct <- function(x, by = NULL, log_scale = FALSE, ...) {
   if (log_scale) ct_vals <- log10(pmax(ct_vals, 1e-10))
   ylab <- if (log_scale) expression(log[10](C[T](x))) else expression(C[T](x))
 
-  y_limits <- c(-0.1, max(ct_vals, na.rm = TRUE))
-
   if (is.null(by)) {
     plot(x$f_hat, ct_vals, xlab = expression(hat(f)(x)), ylab = ylab,
          main = "Covariance Floor vs Fitted Value",
-         ylim = y_limits,
          pch = 16, col = rgb(0, 0, 0, 0.3), ...)
   } else {
     if (!by %in% names(x$newdata)) {
@@ -123,7 +120,6 @@ plot.infForest_ct <- function(x, by = NULL, log_scale = FALSE, ...) {
     xvals <- x$newdata[[by]]
     plot(xvals, ct_vals, xlab = by, ylab = ylab,
          main = paste("Covariance Floor vs", by),
-         ylim = y_limits,
          pch = 16, col = rgb(0, 0, 0, 0.3), ...)
   }
 
