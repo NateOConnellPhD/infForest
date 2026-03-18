@@ -2,20 +2,11 @@
 % Please edit documentation in R/effect.R
 \name{.aipw_curve_one_direction}
 \alias{.aipw_curve_one_direction}
-\title{Hybrid curve slopes: within-leaf working model + AIPW correction}
+\title{AIPW curve slopes for one fold direction using aipw_curve_cpp}
 \usage{
-.aipw_curve_one_direction(
-  rf,
-  X,
-  Y,
-  honest_idx,
-  var,
-  grid,
-  ghat = NULL,
-  subset = NULL
-)
+.aipw_curve_one_direction(rf, X, Y, honest_idx, var, grid, ghat, subset = NULL)
 }
 \description{
-Hybrid curve slopes: within-leaf working model + AIPW correction
+AIPW curve slopes for one fold direction using aipw_curve_cpp
 }
 \keyword{internal}

@@ -6,8 +6,8 @@
 library(infForest)
 
 # === DGM: 5 predictors ===
-set.seed(42)
-n <- 400
+set.seed(40)
+n <- 200
 
 x1    <- rnorm(n)                               # nonlinear effect (sin)
 x2    <- rnorm(n)                               # linear + interaction

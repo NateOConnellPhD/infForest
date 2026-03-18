@@ -180,7 +180,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 }
 
 
-#' Hybrid AIPW scores: within-leaf working model + propensity correction
+#' AIPW scores for one fold direction using aipw_scores_cpp
 #' @keywords internal
 .aipw_one_direction <- function(rf, X, Y, honest_idx, var, a, b,
                                  is_binary, ghat, subset = NULL) {
@@ -194,79 +194,28 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   hon_use <- if (!is.null(subset)) intersect(honest_idx, subset) else honest_idx
   y_hon[hon_use] <- as.numeric(Y[hon_use])
 
-  # --- Working model: within-leaf contrast ---
-  if (is_binary) {
-    res_wl <- honest_all(
-      rf$forest, X_ord, y_hon, as.integer(hon_use),
-      bin_cols = as.integer(col_idx),
-      cont_cols = as.integer(integer(0)),
-      cont_thresh = numeric(0),
-      per_leaf_denom = TRUE
-    )
-    # Per-observation within-leaf contrast (length n, NA where no contrast)
-    tau_wl <- as.numeric(res_wl$binary$obs_mean[[1]])
-    tau_popavg_wl <- res_wl$binary$popavg[1]
-  } else {
-    # For continuous scalar contrast (a vs b), use honest_all with cont threshold
-    thresh <- (a + b) / 2
-    res_wl <- honest_all(
-      rf$forest, X_ord, y_hon, as.integer(hon_use),
-      bin_cols = as.integer(integer(0)),
-      cont_cols = as.integer(col_idx),
-      cont_thresh = thresh,
-      per_leaf_denom = TRUE
-    )
-    tau_wl <- as.numeric(res_wl$continuous$obs_mean[[1]])
-    tau_popavg_wl <- res_wl$continuous$popavg[1]
-  }
+  # Build counterfactual query matrices (ranger column order)
+  X_a <- X_ord
+  X_a[, col_idx + 1L] <- a
 
-  # --- LOO honest prediction at actual X (for residual) ---
-  # Leave-one-out: excludes Y_k from its own leaf mean, preventing
-  # correlation between the residual and the propensity weight.
-  fhat_loo <- honest_predict_loo_cpp(rf$forest, X_ord, y_hon,
-                                      as.integer(hon_use))
+  X_b <- X_ord
+  X_b[, col_idx + 1L] <- b
 
-  # --- AIPW correction ---
-  x_j <- X_ord[hon_use, col_idx + 1L]
-  g_h <- ghat[hon_use]
-  y_h <- as.numeric(Y[hon_use])
-  fhat_h <- fhat_loo[hon_use]
-  tau_h <- tau_wl[hon_use]
-
-  # LOO residual
-  residuals <- y_h - fhat_h
-
-  if (is_binary) {
-    g_h <- pmax(pmin(g_h, 0.975), 0.025)
-    weight <- (x_j - g_h) / (g_h * (1 - g_h))
-  } else {
-    e_j <- x_j - g_h
-    sigma2_ej <- mean(e_j^2)
-    weight <- e_j / sigma2_ej
-  }
-
-  correction <- weight * residuals
-
-  # AIPW score: within-leaf contrast + propensity correction
-  # For obs with NA within-leaf contrast or NA LOO prediction, use what's available
-  phi <- ifelse(is.na(tau_h) | is.na(fhat_h), NA_real_, tau_h + correction)
-
-  # Population average
-  valid <- !is.na(phi)
-  psi <- mean(phi[valid])
-
-  # Diagnostics
-  mean_wl <- mean(tau_h[!is.na(tau_h)])
-  mean_correction <- mean(correction[valid])
-
-  list(
-    psi = psi,
-    phi = phi,
-    mean_wl_contrast = mean_wl,
-    mean_correction = mean_correction,
-    n_valid = sum(valid),
-    n_honest = length(hon_use)
+  res <- aipw_scores_cpp(
+    forest = rf$forest,
+    X_obs = X_ord,
+    X_query_a = X_a,
+    X_query_b = X_b,
+    y_honest = y_hon,
+    honest_idx = as.integer(hon_use),
+    ghat = ghat,
+    var_col = col_idx,
+    is_binary = is_binary,
+    a = a,
+    b = b
   )
+
+  res
 }
 
 
@@ -309,14 +258,13 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 }
 
 
-#' Build effect curve: within-leaf slopes + AIPW confounding correction
+#' Build AIPW effect curve (used by both effect() and effect_curve())
 #' @keywords internal
 .aipw_build_curve <- function(object, var, grid_lo, grid_hi, n_honest, bw,
                                subset = NULL, propensity_trees = 2000L) {
   n_intervals <- max(1L, as.integer(n_honest / bw))
   grid <- seq(grid_lo, grid_hi, length.out = n_intervals + 1)
 
-  # Propensity (fit once, reuse across splits and directions)
   prop <- .fit_propensity(object$X, var, is_binary = FALSE,
                            n_trees = propensity_trees)
 
@@ -348,10 +296,10 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 }
 
 
-#' Hybrid curve slopes: within-leaf working model + AIPW correction
+#' AIPW curve slopes for one fold direction using aipw_curve_cpp
 #' @keywords internal
 .aipw_curve_one_direction <- function(rf, X, Y, honest_idx, var, grid,
-                                       ghat = NULL, subset = NULL) {
+                                       ghat, subset = NULL) {
   X_ord <- reorder_X_to_ranger(X, rf)
   col_idx <- get_ranger_col_idx(rf, var)
 
@@ -361,47 +309,27 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   hon_use <- if (!is.null(subset)) intersect(honest_idx, subset) else honest_idx
   y_hon[hon_use] <- as.numeric(Y[hon_use])
 
-  # --- Within-leaf slopes (working model) ---
-  wins <- .grid_to_windows(grid)
-
-  res <- honest_curve(
-    forest = rf$forest,
-    X_num = X_ord,
-    y_honest = y_hon,
-    honest_idx = as.integer(hon_use),
-    col = col_idx,
-    midpoints = wins$midpts,
-    window_lo = wins$wlo,
-    window_hi = wins$whi
-  )
-
-  slopes <- res$popavg
-  slopes[is.na(slopes)] <- 0
-  slopes <- as.numeric(slopes)
-
-  # --- AIPW confounding correction (constant across intervals) ---
-  if (!is.null(ghat)) {
-    # LOO honest prediction at observed X values
-    fhat_loo <- honest_predict_loo_cpp(rf$forest, X_ord, y_hon,
-                                        as.integer(hon_use))
-
-    # Propensity residual and weight
-    x_j <- X_ord[hon_use, col_idx + 1L]
-    g_h <- ghat[hon_use]
-    e_j <- x_j - g_h
-    sigma2_ej <- mean(e_j^2)
-
-    # LOO residual at honest obs
-    fhat_h <- fhat_loo[hon_use]
-    valid_loo <- !is.na(fhat_h)
-    residuals <- as.numeric(Y[hon_use]) - fhat_h
-
-    # Constant correction: mean of (e_j / sigma2_ej) * residual (LOO valid only)
-    correction <- mean((e_j[valid_loo] / sigma2_ej) * residuals[valid_loo])
-
-    slopes <- slopes + correction
+  # Build query matrices for each grid point (ranger column order)
+  X_grid_list <- vector("list", length(grid))
+  for (g in seq_along(grid)) {
+    Xg <- X_ord
+    Xg[, col_idx + 1L] <- grid[g]
+    X_grid_list[[g]] <- Xg
   }
 
+  res <- aipw_curve_cpp(
+    forest = rf$forest,
+    X_obs = X_ord,
+    X_grid_list = X_grid_list,
+    y_honest = y_hon,
+    honest_idx = as.integer(hon_use),
+    ghat = ghat,
+    var_col = col_idx,
+    grid_points = grid
+  )
+
+  slopes <- res$slopes
+  slopes[is.na(slopes)] <- 0
   slopes
 }
 
