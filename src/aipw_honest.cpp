@@ -94,6 +94,105 @@ NumericVector honest_predict_cpp(
 }
 
 
+// Leave-one-out honest prediction at honest observation positions.
+//
+// For each honest observation k, predicts f_{-k}(X_k): the honest leaf mean
+// in each tree EXCLUDING Y_k from the leaf sum. This ensures the residual
+// Y_k - f_{-k}(X_k) is independent of the leaf mean, preventing the
+// propensity-weighted residual from having a systematic nonzero mean.
+//
+// Returns a length-n vector (NA for non-honest observations).
+//
+// [[Rcpp::export]]
+NumericVector honest_predict_loo_cpp(
+    List forest,
+    NumericMatrix X_honest,
+    NumericVector y_honest,
+    IntegerVector honest_idx
+) {
+    List svl = forest["split.varIDs"];
+    List svall = forest["split.values"];
+    List chl = forest["child.nodeIDs"];
+    int B = svl.size();
+    int n = X_honest.nrow();
+    int n_hon = honest_idx.size();
+
+    const double* Xh_ptr = REAL(X_honest);
+    const double* y_ptr = REAL(y_honest);
+
+    std::vector<bool> is_honest(n, false);
+    for (int j = 0; j < n_hon; j++)
+        is_honest[honest_idx[j] - 1] = true;
+
+    std::vector<std::vector<int>> all_sv(B), all_lc(B), all_rc(B);
+    std::vector<std::vector<double>> all_sval(B);
+    for (int b = 0; b < B; b++) {
+        IntegerVector sv_r = svl[b]; NumericVector sval_r = svall[b];
+        List ch = chl[b]; IntegerVector lc_r = ch[0], rc_r = ch[1];
+        all_sv[b].assign(sv_r.begin(), sv_r.end());
+        all_sval[b].assign(sval_r.begin(), sval_r.end());
+        all_lc[b].assign(lc_r.begin(), lc_r.end());
+        all_rc[b].assign(rc_r.begin(), rc_r.end());
+    }
+
+    // Accumulators for each honest observation: sum of LOO predictions, count of trees
+    std::vector<double> pred_sum(n, 0.0);
+    std::vector<int> pred_cnt(n, 0);
+
+    for (int b = 0; b < B; b++) {
+        const int* sv = all_sv[b].data();
+        const double* sval = all_sval[b].data();
+        const int* lc = all_lc[b].data();
+        const int* rc = all_rc[b].data();
+
+        // Route all honest obs to leaves, compute leaf sums and counts
+        std::unordered_map<int, double> leaf_ysum;
+        std::unordered_map<int, int> leaf_ycnt;
+        std::vector<int> obs_leaf(n, -1);
+
+        for (int j = 0; j < n_hon; j++) {
+            int i = honest_idx[j] - 1;
+            double yi = y_ptr[i];
+            if (ISNA(yi)) continue;
+            int node = 0;
+            while (lc[node] != 0 || rc[node] != 0)
+                node = (Xh_ptr[i + n * sv[node]] <= sval[node]) ? lc[node] : rc[node];
+            obs_leaf[i] = node;
+            leaf_ysum[node] += yi;
+            leaf_ycnt[node]++;
+        }
+
+        // For each honest obs: LOO prediction = (leaf_sum - Y_k) / (leaf_count - 1)
+        for (int j = 0; j < n_hon; j++) {
+            int i = honest_idx[j] - 1;
+            double yi = y_ptr[i];
+            if (ISNA(yi)) continue;
+            int leaf = obs_leaf[i];
+            if (leaf < 0) continue;
+
+            auto it_sum = leaf_ysum.find(leaf);
+            auto it_cnt = leaf_ycnt.find(leaf);
+            if (it_sum == leaf_ysum.end() || it_cnt == leaf_ycnt.end()) continue;
+
+            int cnt = it_cnt->second;
+            if (cnt <= 1) continue;  // can't do LOO with only 1 obs in leaf
+
+            double loo_mean = (it_sum->second - yi) / (cnt - 1);
+            pred_sum[i] += loo_mean;
+            pred_cnt[i]++;
+        }
+    }
+
+    NumericVector result(n, NA_REAL);
+    for (int j = 0; j < n_hon; j++) {
+        int i = honest_idx[j] - 1;
+        if (pred_cnt[i] > 0)
+            result[i] = pred_sum[i] / pred_cnt[i];
+    }
+    return result;
+}
+
+
 // AIPW scores for one fold direction, one variable.
 //
 // All trees contribute to fhat_obs, fhat_a, fhat_b.

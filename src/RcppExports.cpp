@@ -25,6 +25,20 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// honest_predict_loo_cpp
+NumericVector honest_predict_loo_cpp(List forest, NumericMatrix X_honest, NumericVector y_honest, IntegerVector honest_idx);
+RcppExport SEXP _infForest_honest_predict_loo_cpp(SEXP forestSEXP, SEXP X_honestSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type forest(forestSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_honest(X_honestSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y_honest(y_honestSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type honest_idx(honest_idxSEXP);
+    rcpp_result_gen = Rcpp::wrap(honest_predict_loo_cpp(forest, X_honest, y_honest, honest_idx));
+    return rcpp_result_gen;
+END_RCPP
+}
 // aipw_scores_cpp
 List aipw_scores_cpp(List forest, NumericMatrix X_obs, NumericMatrix X_query_a, NumericMatrix X_query_b, NumericVector y_honest, IntegerVector honest_idx, NumericVector ghat, int var_col, bool is_binary, double a, double b);
 RcppExport SEXP _infForest_aipw_scores_cpp(SEXP forestSEXP, SEXP X_obsSEXP, SEXP X_query_aSEXP, SEXP X_query_bSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP ghatSEXP, SEXP var_colSEXP, SEXP is_binarySEXP, SEXP aSEXP, SEXP bSEXP) {
@@ -120,6 +134,7 @@ END_RCPP
 
 static const R_CallMethodDef CallEntries[] = {
     {"_infForest_honest_predict_cpp", (DL_FUNC) &_infForest_honest_predict_cpp, 5},
+    {"_infForest_honest_predict_loo_cpp", (DL_FUNC) &_infForest_honest_predict_loo_cpp, 4},
     {"_infForest_aipw_scores_cpp", (DL_FUNC) &_infForest_aipw_scores_cpp, 11},
     {"_infForest_aipw_curve_cpp", (DL_FUNC) &_infForest_aipw_curve_cpp, 8},
     {"_infForest_honest_all", (DL_FUNC) &_infForest_honest_all, 8},

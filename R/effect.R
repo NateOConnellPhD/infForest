@@ -220,17 +220,20 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     tau_popavg_wl <- res_wl$continuous$popavg[1]
   }
 
-  # --- Honest prediction at actual X (for residual) ---
-  fhat_obs <- honest_predict_cpp(rf$forest, X_ord, X_ord, y_hon,
-                                  as.integer(hon_use))
+  # --- LOO honest prediction at actual X (for residual) ---
+  # Leave-one-out: excludes Y_k from its own leaf mean, preventing
+  # correlation between the residual and the propensity weight.
+  fhat_loo <- honest_predict_loo_cpp(rf$forest, X_ord, y_hon,
+                                      as.integer(hon_use))
 
   # --- AIPW correction ---
   x_j <- X_ord[hon_use, col_idx + 1L]
   g_h <- ghat[hon_use]
   y_h <- as.numeric(Y[hon_use])
-  fhat_h <- fhat_obs[hon_use]
+  fhat_h <- fhat_loo[hon_use]
   tau_h <- tau_wl[hon_use]
 
+  # LOO residual
   residuals <- y_h - fhat_h
 
   if (is_binary) {
@@ -245,8 +248,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   correction <- weight * residuals
 
   # AIPW score: within-leaf contrast + propensity correction
-  # For obs with NA within-leaf contrast, use correction only
-  phi <- ifelse(is.na(tau_h), correction, tau_h + correction)
+  # For obs with NA within-leaf contrast or NA LOO prediction, use what's available
+  phi <- ifelse(is.na(tau_h) | is.na(fhat_h), NA_real_, tau_h + correction)
 
   # Population average
   valid <- !is.na(phi)
@@ -378,9 +381,9 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 
   # --- AIPW confounding correction (constant across intervals) ---
   if (!is.null(ghat)) {
-    # Honest prediction at observed X values
-    fhat_obs <- honest_predict_cpp(rf$forest, X_ord, X_ord, y_hon,
-                                    as.integer(hon_use))
+    # LOO honest prediction at observed X values
+    fhat_loo <- honest_predict_loo_cpp(rf$forest, X_ord, y_hon,
+                                        as.integer(hon_use))
 
     # Propensity residual and weight
     x_j <- X_ord[hon_use, col_idx + 1L]
@@ -388,11 +391,13 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     e_j <- x_j - g_h
     sigma2_ej <- mean(e_j^2)
 
-    # Residual at honest obs
-    residuals <- as.numeric(Y[hon_use]) - fhat_obs[hon_use]
+    # LOO residual at honest obs
+    fhat_h <- fhat_loo[hon_use]
+    valid_loo <- !is.na(fhat_h)
+    residuals <- as.numeric(Y[hon_use]) - fhat_h
 
-    # Constant correction: mean of (e_j / sigma2_ej) * residual
-    correction <- mean((e_j / sigma2_ej) * residuals)
+    # Constant correction: mean of (e_j / sigma2_ej) * residual (LOO valid only)
+    correction <- mean((e_j[valid_loo] / sigma2_ej) * residuals[valid_loo])
 
     slopes <- slopes + correction
   }

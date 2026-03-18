@@ -5,6 +5,10 @@ honest_predict_cpp <- function(forest, X_query, X_honest, y_honest, honest_idx) 
     .Call(`_infForest_honest_predict_cpp`, forest, X_query, X_honest, y_honest, honest_idx)
 }
 
+honest_predict_loo_cpp <- function(forest, X_honest, y_honest, honest_idx) {
+    .Call(`_infForest_honest_predict_loo_cpp`, forest, X_honest, y_honest, honest_idx)
+}
+
 aipw_scores_cpp <- function(forest, X_obs, X_query_a, X_query_b, y_honest, honest_idx, ghat, var_col, is_binary, a, b) {
     .Call(`_infForest_aipw_scores_cpp`, forest, X_obs, X_query_a, X_query_b, y_honest, honest_idx, ghat, var_col, is_binary, a, b)
 }
