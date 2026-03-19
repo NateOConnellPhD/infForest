@@ -2,11 +2,11 @@
 % Please edit documentation in R/effect.R
 \name{.fit_propensity}
 \alias{.fit_propensity}
-\title{Fit propensity model: predict X_j from X_{-j}}
+\title{Fit propensity model: predict X_j from X_{-j} using OOB predictions}
 \usage{
 .fit_propensity(X, var, is_binary, n_trees = 2000L)
 }
 \description{
-Fit propensity model: predict X_j from X_{-j}
+Fit propensity model: predict X_j from X_{-j} using OOB predictions
 }
 \keyword{internal}

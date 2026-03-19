@@ -2,7 +2,9 @@
 % Please edit documentation in R/effect.R
 \name{.aipw_one_direction}
 \alias{.aipw_one_direction}
-\title{AIPW scores for one fold direction using aipw_scores_cpp}
+\title{AIPW scores for one fold direction
+Binary: augmented forest (forced X_j split at 0.5 in every leaf)
+Continuous: original forest (no augmentation)}
 \usage{
 .aipw_one_direction(
   rf,
@@ -18,6 +20,8 @@
 )
 }
 \description{
-AIPW scores for one fold direction using aipw_scores_cpp
+AIPW scores for one fold direction
+Binary: augmented forest (forced X_j split at 0.5 in every leaf)
+Continuous: original forest (no augmentation)
 }
 \keyword{internal}

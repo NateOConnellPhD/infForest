@@ -51,9 +51,10 @@ A list of class \code{infForest_effect}.
 }
 \description{
 Computes population-averaged effects of a predictor using honest AIPW
-estimation. For binary predictors, returns the average difference between
-groups. For continuous predictors, returns per-unit slopes between all
-pairwise combinations of analyst-specified comparison points.
+estimation. For binary predictors, uses leaf augmentation to ensure every
+tree contributes a nonzero prediction contrast, then applies the standard
+AIPW scorer. For continuous predictors, returns per-unit slopes from the
+AIPW counterfactual curve without augmentation.
 }
 \details{
 The estimator combines honest forest predictions (working model) with

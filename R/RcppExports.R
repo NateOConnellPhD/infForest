@@ -13,8 +13,12 @@ aipw_scores_cpp <- function(forest, X_obs, X_query_a, X_query_b, y_honest, hones
     .Call(`_infForest_aipw_scores_cpp`, forest, X_obs, X_query_a, X_query_b, y_honest, honest_idx, ghat, var_col, is_binary, a, b)
 }
 
-aipw_curve_cpp <- function(forest, X_obs, X_grid_list, y_honest, honest_idx, ghat, var_col, grid_points) {
-    .Call(`_infForest_aipw_curve_cpp`, forest, X_obs, X_grid_list, y_honest, honest_idx, ghat, var_col, grid_points)
+aipw_curve_cpp <- function(forest, X_obs, X_grid_list, y_honest, honest_idx, ghat, var_col, grid_points, sigma2_override = -1.0) {
+    .Call(`_infForest_aipw_curve_cpp`, forest, X_obs, X_grid_list, y_honest, honest_idx, ghat, var_col, grid_points, sigma2_override)
+}
+
+augment_forest_with_splits <- function(forest, X_obs, honest_idx, var_col, cutpoint, query_a, query_b) {
+    .Call(`_infForest_augment_forest_with_splits`, forest, X_obs, honest_idx, var_col, cutpoint, query_a, query_b)
 }
 
 honest_all <- function(forest, X_num, y_honest, honest_idx, bin_cols, cont_cols, cont_thresh, per_leaf_denom = TRUE) {

@@ -6,8 +6,8 @@
 library(infForest)
 
 # === DGM: 5 predictors ===
-set.seed(40)
-n <- 200
+set.seed(42)
+n <- 400
 
 x1    <- rnorm(n)                               # nonlinear effect (sin)
 x2    <- rnorm(n)                               # linear + interaction
@@ -45,6 +45,14 @@ fit <- infForest(y ~ ., data = dat_cont, num.trees = 3000,
                  penalize = TRUE, softmax = TRUE)
 print(fit)
 
+
+ec <- effect_curve(fit, "x1", bw = 20)
+plot(ec, ylim = c(-1.2, 1.2))
+x1_ref <- ec$ref
+curve(0.8 * sin(1.5 * x) - 0.8 * sin(1.5 * x1_ref),
+      add = TRUE, col = "red", lty = 2, lwd = 2)
+legend("topleft", c("infForest", "DGM truth"),
+       col = c("black", "red"), lty = c(1, 2), lwd = 2)
 # ============================================================
 # 2. Effect estimation
 # ============================================================
@@ -189,4 +197,30 @@ polygon(c(seq_along(ord), rev(seq_along(ord))),
         col = rgb(0, 0, 1, 0.15), border = NA)
 abline(h = 0.5, col = "gray60", lty = 3)
 #dev.off()
+cat("\n=== Worked example complete ===\n")
+
+# ============================================================
+# 10. Predictions at new data points
+# ============================================================
+cat("\n=== Predictions at new data points ===\n")
+
+set.seed(99)
+new_x1    <- rnorm(20)
+new_x2    <- rnorm(20)
+new_trt   <- rbinom(20, 1, 0.4)
+new_x4    <- 0.5 * new_x2 + rnorm(20) * sqrt(0.75)
+new_noise <- rnorm(20)
+newdata <- data.frame(x1 = new_x1, x2 = new_x2, trt = new_trt,
+                      x4 = new_x4, noise = new_noise)
+
+# Continuous: predictions with CIs and PIs
+cat("\nContinuous outcome - predictions at new points:\n")
+pred_new <- pasr_predict(fit, newdata = newdata, R_max = 50L, verbose = TRUE)
+print(pred_new[, c("f_hat", "se", "ci_lower", "ci_upper", "pi_lower", "pi_upper")])
+
+# Binary: predicted probabilities with CIs
+cat("\nBinary outcome - predicted probabilities at new points:\n")
+pred_new_bin <- pasr_predict(fit_bin, newdata = newdata, R_max = 50L, verbose = TRUE)
+print(pred_new_bin[, c("f_hat", "se", "ci_lower", "ci_upper")])
+
 cat("\n=== Worked example complete ===\n")

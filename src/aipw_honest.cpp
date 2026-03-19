@@ -395,7 +395,8 @@ List aipw_curve_cpp(
     IntegerVector honest_idx,
     NumericVector ghat,
     int var_col,
-    NumericVector grid_points  // G+1 grid values
+    NumericVector grid_points, // G+1 grid values
+    double sigma2_override = -1.0  // if positive, use instead of internal sigma2_ej
 ) {
     List svl = forest["split.varIDs"];
     List svall = forest["split.values"];
@@ -504,14 +505,19 @@ List aipw_curve_cpp(
     }
     // ========== END TREE LOOP ==========
 
-    // sigma2_ej
-    double ss = 0.0;
-    for (int j = 0; j < n_hon; j++) {
-        int i = honest_idx[j] - 1;
-        double ej = Xobs_ptr[i + n * var_col] - g_ptr[i];
-        ss += ej * ej;
+    // sigma2_ej: use override if provided, otherwise compute from data
+    double sigma2_ej;
+    if (sigma2_override > 0.0) {
+        sigma2_ej = sigma2_override;
+    } else {
+        double ss = 0.0;
+        for (int j = 0; j < n_hon; j++) {
+            int i = honest_idx[j] - 1;
+            double ej = Xobs_ptr[i + n * var_col] - g_ptr[i];
+            ss += ej * ej;
+        }
+        sigma2_ej = ss / n_hon;
     }
-    double sigma2_ej = ss / n_hon;
 
     // Compute AIPW slopes at each interval
     NumericVector slopes(G);

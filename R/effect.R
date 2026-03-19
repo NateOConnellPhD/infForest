@@ -1,9 +1,10 @@
 #' Estimate the Effect of a Predictor
 #'
 #' Computes population-averaged effects of a predictor using honest AIPW
-#' estimation. For binary predictors, returns the average difference between
-#' groups. For continuous predictors, returns per-unit slopes between all
-#' pairwise combinations of analyst-specified comparison points.
+#' estimation. For binary predictors, uses leaf augmentation to ensure every
+#' tree contributes a nonzero prediction contrast, then applies the standard
+#' AIPW scorer. For continuous predictors, returns per-unit slopes from the
+#' AIPW counterfactual curve without augmentation.
 #'
 #' The estimator combines honest forest predictions (working model) with
 #' propensity-weighted honest residuals (debiasing correction). Double
@@ -74,7 +75,6 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     stop("Categorical predictors with >2 levels not yet supported.")
   }
 
-  # Resolve comparison points
   if (type == "quantile") {
     at_vals <- unname(quantile(x_var, at))
     at_labels <- paste0("Q", round(at * 100))
@@ -86,7 +86,6 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   at_vals <- sort(at_vals)
   at_labels <- at_labels[order(at)]
 
-  # Build the curve once, then read off all contrasts
   n_honest <- nrow(object$X) %/% 2
   n_intervals <- max(1L, as.integer(n_honest / bw))
 
@@ -98,7 +97,6 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
                                      subset = subset,
                                      propensity_trees = propensity_trees)
 
-  # Extract all pairwise contrasts (hi > lo)
   n_at <- length(at_vals)
   pairs <- combn(n_at, 2)
   n_pairs <- ncol(pairs)
@@ -144,7 +142,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 # AIPW internals
 # ============================================================
 
-#' Fit propensity model: predict X_j from X_{-j}
+#' Fit propensity model: predict X_j from X_{-j} using OOB predictions
 #' @keywords internal
 .fit_propensity <- function(X, var, is_binary, n_trees = 2000L) {
   var_col_r <- which(names(X) == var)
@@ -160,7 +158,6 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
       mtry = max(1L, floor(sqrt(ncol(X_minus_j)))),
       replace = TRUE
     )
-    # OOB predictions: each obs predicted by trees that excluded it
     ghat <- prop_rf$predictions[, 2]
     ghat <- pmax(pmin(ghat, 0.975), 0.025)
   } else {
@@ -172,7 +169,6 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
       mtry = max(1L, floor(sqrt(ncol(X_minus_j)))),
       replace = TRUE
     )
-    # OOB predictions: prevents propensity overfitting
     ghat <- prop_rf$predictions
   }
 
@@ -180,29 +176,34 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 }
 
 
-#' AIPW scores for one fold direction using aipw_scores_cpp
+#' AIPW scores for one fold direction
+#' Binary: augmented forest (forced X_j split at 0.5 in every leaf)
+#' Continuous: original forest (no augmentation)
 #' @keywords internal
 .aipw_one_direction <- function(rf, X, Y, honest_idx, var, a, b,
                                  is_binary, ghat, subset = NULL) {
   X_ord <- reorder_X_to_ranger(X, rf)
   col_idx <- get_ranger_col_idx(rf, var)
-
   n <- nrow(X)
 
-  # Honest Y vector: NA for non-honest
   y_hon <- rep(NA_real_, n)
   hon_use <- if (!is.null(subset)) intersect(honest_idx, subset) else honest_idx
   y_hon[hon_use] <- as.numeric(Y[hon_use])
 
-  # Build counterfactual query matrices (ranger column order)
-  X_a <- X_ord
-  X_a[, col_idx + 1L] <- a
+  # Binary: augment forest so every tree splits on X_j
+  # Var_D(X_j) = 0 for binary, so augmentation introduces no inflation
+  forest_to_use <- rf$forest
+  if (is_binary) {
+    forest_to_use <- augment_forest_with_splits(
+      rf$forest, X_ord, as.integer(hon_use), col_idx, 0.5, a, b
+    )
+  }
 
-  X_b <- X_ord
-  X_b[, col_idx + 1L] <- b
+  X_a <- X_ord; X_a[, col_idx + 1L] <- a
+  X_b <- X_ord; X_b[, col_idx + 1L] <- b
 
   res <- aipw_scores_cpp(
-    forest = rf$forest,
+    forest = forest_to_use,
     X_obs = X_ord,
     X_query_a = X_a,
     X_query_b = X_b,
@@ -258,7 +259,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 }
 
 
-#' Build AIPW effect curve (used by both effect() and effect_curve())
+#' Build AIPW effect curve for continuous predictors (no augmentation)
 #' @keywords internal
 .aipw_build_curve <- function(object, var, grid_lo, grid_hi, n_honest, bw,
                                subset = NULL, propensity_trees = 2000L) {
@@ -296,22 +297,21 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 }
 
 
-#' AIPW curve slopes for one fold direction using aipw_curve_cpp
+#' AIPW curve slopes via aipw_curve_cpp on the original (unmodified) forest
 #' @keywords internal
 .aipw_curve_one_direction <- function(rf, X, Y, honest_idx, var, grid,
                                        ghat, subset = NULL) {
   X_ord <- reorder_X_to_ranger(X, rf)
   col_idx <- get_ranger_col_idx(rf, var)
-
   n <- nrow(X)
+  G <- length(grid) - 1
 
   y_hon <- rep(NA_real_, n)
   hon_use <- if (!is.null(subset)) intersect(honest_idx, subset) else honest_idx
   y_hon[hon_use] <- as.numeric(Y[hon_use])
 
-  # Build query matrices for each grid point (ranger column order)
-  X_grid_list <- vector("list", length(grid))
-  for (g in seq_along(grid)) {
+  X_grid_list <- vector("list", G + 1)
+  for (g in seq_len(G + 1)) {
     Xg <- X_ord
     Xg[, col_idx + 1L] <- grid[g]
     X_grid_list[[g]] <- Xg
@@ -382,16 +382,6 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     honest_idx = honest_idx, var = var,
     grid = grid, ghat = prop$ghat
   )
-}
-
-#' @keywords internal
-.grid_to_windows <- function(grid) {
-  G <- length(grid)
-  midpts <- (grid[-1] + grid[-G]) / 2
-  intervals <- diff(grid)
-  wlo <- grid[-G] - intervals
-  whi <- grid[-1] + intervals
-  list(midpts = midpts, intervals = intervals, wlo = wlo, whi = whi)
 }
 
 

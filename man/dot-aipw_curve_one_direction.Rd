@@ -2,11 +2,11 @@
 % Please edit documentation in R/effect.R
 \name{.aipw_curve_one_direction}
 \alias{.aipw_curve_one_direction}
-\title{AIPW curve slopes for one fold direction using aipw_curve_cpp}
+\title{AIPW curve slopes via aipw_curve_cpp on the original (unmodified) forest}
 \usage{
 .aipw_curve_one_direction(rf, X, Y, honest_idx, var, grid, ghat, subset = NULL)
 }
 \description{
-AIPW curve slopes for one fold direction using aipw_curve_cpp
+AIPW curve slopes via aipw_curve_cpp on the original (unmodified) forest
 }
 \keyword{internal}

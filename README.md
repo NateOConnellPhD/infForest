@@ -113,7 +113,11 @@ effect(fit, "x4")
 #>     Q25 to Q75  [-0.765, 0.585]:  -0.0517
 ```
 
-### PASR confidence interval for an effect
+### Variance estimation with PASR
+
+Procedure-Aligned Synthetic Resampling (PASR) estimates the variance of any forest-based estimator by decomposing total uncertainty into Monte Carlo error (from using finitely many trees) and the covariance floor (the irreducible variance that persists even with infinite trees). PASR generates synthetic outcomes from a fitted nuisance model, refits paired forests on each synthetic dataset, and estimates the covariance floor from cross-covariance of paired estimates. See [O'Connell (2025)](https://arxiv.org/abs/2602.13104) for the theory and coverage guarantees.
+
+#### PASR confidence interval for an effect
 
 ```r
 pe_trt <- pasr_effect(fit, "trt", verbose = TRUE)
@@ -128,7 +132,7 @@ pe_trt
 #>   p-value:     0.000206
 ```
 
-### Nonlinear effect curve with PASR confidence bands
+#### Nonlinear effect curve with PASR confidence bands
 
 The effect curve traces $E[Y \mid X_1 = x] - E[Y \mid X_1 = \text{ref}]$ nonparametrically. The true shape is $0.8 \sin(1.5 x_1)$. PASR confidence bands are computed at each grid point by calling `pasr_effect` with raw value contrasts against the median.
 
@@ -179,7 +183,7 @@ int(fit, "x2", by = "trt")
 #>     trt = 1 vs trt = 0               -0.1583
 ```
 
-### Covariance floor diagnostic
+#### Covariance floor diagnostic
 
 The covariance floor $C_T(x)$ shows where the forest's irreducible prediction uncertainty is highest — typically in regions with sparse data or complex signal.
 
@@ -211,8 +215,8 @@ par(mfrow = c(1, 1))
 
 ![Covariance floor diagnostic](man/figures/cov_floor_diagnostic.png)
 
-### Prediction intervals (continuous outcome)
-Evaluate the observed vs predicted outcomes with PASR estiamted 95\% confidence intervals for the continuous outcome. 
+#### Prediction intervals (continuous outcome)
+
 ```r
 pi_cont <- pasr_predict(fit, R_max = 50L, verbose = TRUE)
 #>   PASR R=20: median_Ct=0.106982  med_rel_change=Inf  stable=0/2
@@ -241,8 +245,8 @@ segments(pi_cont$f_hat, pi_cont$pi_lower, pi_cont$f_hat, pi_cont$pi_upper,
 
 ![Prediction intervals for continuous outcome](man/figures/pred_int_cont.png)
 
-### Confidence intervals for probabilities (binary outcome)
-Evaluate the observed vs predicted probabilities with PASR estiamted 95\% confidence intervals. 
+#### Confidence intervals for probabilities (binary outcome)
+
 ```r
 fit_bin <- infForest(y ~ ., data = dat_bin, num.trees = 3000,
                      penalize = TRUE, softmax = TRUE)
@@ -265,6 +269,30 @@ abline(h = 0.5, col = "gray60", lty = 3)
 ```
 
 ![Confidence intervals for predicted probabilities](man/figures/pred_int_bin.png)
+
+#### Predictions at new data points
+
+A fitted inference forest can generate predictions with PASR variance estimates at new covariate values — observations not in the training data. This is the standard use case: fit once, predict many.
+
+```r
+# Generate new observations
+set.seed(99)
+new_x1    <- rnorm(20)
+new_x2    <- rnorm(20)
+new_trt   <- rbinom(20, 1, 0.4)
+new_x4    <- 0.5 * new_x2 + rnorm(20) * sqrt(0.75)
+new_noise <- rnorm(20)
+newdata <- data.frame(x1 = new_x1, x2 = new_x2, trt = new_trt,
+                      x4 = new_x4, noise = new_noise)
+
+# Predictions with CIs and PIs at new points (continuous)
+pred_new <- pasr_predict(fit, newdata = newdata, R_max = 50L, verbose = TRUE)
+print(pred_new[, c("f_hat", "se", "ci_lower", "ci_upper", "pi_lower", "pi_upper")])
+
+# Predicted probabilities with CIs at new points (binary)
+pred_new_bin <- pasr_predict(fit_bin, newdata = newdata, R_max = 50L, verbose = TRUE)
+print(pred_new_bin[, c("f_hat", "se", "ci_lower", "ci_upper")])
+```
 
 ## What the package provides
 
@@ -369,21 +397,21 @@ The covariance floor $C_T(x)$ captures irreducible dependence between trees shar
 
 ## Theoretical foundation
 
-O'Connell, N.S. (2026). Random Forests as Statistical Procedures: Design, Variance, and Dependence. *arXiv:2602.13104*. [[paper]](https://arxiv.org/abs/2602.13104)
+O'Connell, N.S. (2025). Random Forests as Statistical Procedures: Design, Variance, and Dependence. *arXiv:2602.13104*. [[paper]](https://arxiv.org/abs/2602.13104)
 
-O'Connell, N.S. (2026). Inference Forests: A Framework for Nonparametric Inference. *In preparation*.
+O'Connell, N.S. (2025). Inference Forests: A Framework for Nonparametric Inference. *In preparation*.
 
 ## Citation
 
 ```bibtex
-@article{oconnell2026rf,
+@article{oconnell2025rf,
   title={Random Forests as Statistical Procedures: Design, Variance, and Dependence},
   author={O'Connell, Nathaniel S.},
   journal={arXiv preprint arXiv:2602.13104},
   year={2025}
 }
 
-@article{oconnell2026infforest,
+@article{oconnell2025infforest,
   title={Inference Forests: A Framework for Nonparametric Inference},
   author={O'Connell, Nathaniel S.},
   year={2025}
