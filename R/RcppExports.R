@@ -13,6 +13,14 @@ aipw_scores_cpp <- function(forest, X_obs, X_query_a, X_query_b, y_honest, hones
     .Call(`_infForest_aipw_scores_cpp`, forest, X_obs, X_query_a, X_query_b, y_honest, honest_idx, ghat, var_col, is_binary, a, b)
 }
 
+aipw_scores_v2_cpp <- function(forest, X_obs, y_honest, honest_idx, ghat, var_col, is_binary, a, b) {
+    .Call(`_infForest_aipw_scores_v2_cpp`, forest, X_obs, y_honest, honest_idx, ghat, var_col, is_binary, a, b)
+}
+
+aipw_curve_v2_cpp <- function(forest, X_obs, y_honest, honest_idx, ghat, var_col, grid_points, sigma2_override = -1.0) {
+    .Call(`_infForest_aipw_curve_v2_cpp`, forest, X_obs, y_honest, honest_idx, ghat, var_col, grid_points, sigma2_override)
+}
+
 aipw_curve_cpp <- function(forest, X_obs, X_grid_list, y_honest, honest_idx, ghat, var_col, grid_points, sigma2_override = -1.0) {
     .Call(`_infForest_aipw_curve_cpp`, forest, X_obs, X_grid_list, y_honest, honest_idx, ghat, var_col, grid_points, sigma2_override)
 }

@@ -174,11 +174,18 @@ infForest <- function(formula,
     )
   }
 
+  # --- Cache ranger-ordered X matrix ---
+  # All forests use the same X columns (from the same data frame),
+  # so the ranger column ordering is identical across rfA/rfB/splits.
+  # Compute once here; .get_X_ord() in effect.R uses this cache.
+  X_ord <- reorder_X_to_ranger(X, forests[[1]]$rfA)
+
   # --- Build return object ---
   out <- list(
     forests = forests,
     X = X,
     X_num = X_num,
+    X_ord = X_ord,
     Y = Y,
     fold_assignments = fold_list,
     outcome_type = outcome_type,

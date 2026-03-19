@@ -60,6 +60,43 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// aipw_scores_v2_cpp
+List aipw_scores_v2_cpp(List forest, NumericMatrix X_obs, NumericVector y_honest, IntegerVector honest_idx, NumericVector ghat, int var_col, bool is_binary, double a, double b);
+RcppExport SEXP _infForest_aipw_scores_v2_cpp(SEXP forestSEXP, SEXP X_obsSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP ghatSEXP, SEXP var_colSEXP, SEXP is_binarySEXP, SEXP aSEXP, SEXP bSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type forest(forestSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_obs(X_obsSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y_honest(y_honestSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type honest_idx(honest_idxSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type ghat(ghatSEXP);
+    Rcpp::traits::input_parameter< int >::type var_col(var_colSEXP);
+    Rcpp::traits::input_parameter< bool >::type is_binary(is_binarySEXP);
+    Rcpp::traits::input_parameter< double >::type a(aSEXP);
+    Rcpp::traits::input_parameter< double >::type b(bSEXP);
+    rcpp_result_gen = Rcpp::wrap(aipw_scores_v2_cpp(forest, X_obs, y_honest, honest_idx, ghat, var_col, is_binary, a, b));
+    return rcpp_result_gen;
+END_RCPP
+}
+// aipw_curve_v2_cpp
+List aipw_curve_v2_cpp(List forest, NumericMatrix X_obs, NumericVector y_honest, IntegerVector honest_idx, NumericVector ghat, int var_col, NumericVector grid_points, double sigma2_override);
+RcppExport SEXP _infForest_aipw_curve_v2_cpp(SEXP forestSEXP, SEXP X_obsSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP ghatSEXP, SEXP var_colSEXP, SEXP grid_pointsSEXP, SEXP sigma2_overrideSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type forest(forestSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_obs(X_obsSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y_honest(y_honestSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type honest_idx(honest_idxSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type ghat(ghatSEXP);
+    Rcpp::traits::input_parameter< int >::type var_col(var_colSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type grid_points(grid_pointsSEXP);
+    Rcpp::traits::input_parameter< double >::type sigma2_override(sigma2_overrideSEXP);
+    rcpp_result_gen = Rcpp::wrap(aipw_curve_v2_cpp(forest, X_obs, y_honest, honest_idx, ghat, var_col, grid_points, sigma2_override));
+    return rcpp_result_gen;
+END_RCPP
+}
 // aipw_curve_cpp
 List aipw_curve_cpp(List forest, NumericMatrix X_obs, List X_grid_list, NumericVector y_honest, IntegerVector honest_idx, NumericVector ghat, int var_col, NumericVector grid_points, double sigma2_override);
 RcppExport SEXP _infForest_aipw_curve_cpp(SEXP forestSEXP, SEXP X_obsSEXP, SEXP X_grid_listSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP ghatSEXP, SEXP var_colSEXP, SEXP grid_pointsSEXP, SEXP sigma2_overrideSEXP) {
@@ -154,6 +191,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_infForest_honest_predict_cpp", (DL_FUNC) &_infForest_honest_predict_cpp, 5},
     {"_infForest_honest_predict_loo_cpp", (DL_FUNC) &_infForest_honest_predict_loo_cpp, 4},
     {"_infForest_aipw_scores_cpp", (DL_FUNC) &_infForest_aipw_scores_cpp, 11},
+    {"_infForest_aipw_scores_v2_cpp", (DL_FUNC) &_infForest_aipw_scores_v2_cpp, 9},
+    {"_infForest_aipw_curve_v2_cpp", (DL_FUNC) &_infForest_aipw_curve_v2_cpp, 8},
     {"_infForest_aipw_curve_cpp", (DL_FUNC) &_infForest_aipw_curve_cpp, 9},
     {"_infForest_augment_forest_with_splits", (DL_FUNC) &_infForest_augment_forest_with_splits, 7},
     {"_infForest_honest_all", (DL_FUNC) &_infForest_honest_all, 8},

@@ -97,13 +97,17 @@ int <- function(...) interaction(...)
 
   focal_type <- detect_var_type(object$X[[var]])
 
-  # Compute effect within each by-group
+  # Fit propensity ONCE for the focal variable — shared across subgroups
+  prop <- .fit_propensity(object$X, var, is_binary = (focal_type == "binary"))
+  ghat <- prop$ghat
+
+  # Compute effect within each by-group, passing cached ghat
   eff_1 <- .effect_within_subset(object, var, subset_idx = idx_1,
                                   at = at, type = type, bw = bw,
-                                  q_lo = q_lo, q_hi = q_hi)
+                                  q_lo = q_lo, q_hi = q_hi, ghat = ghat)
   eff_0 <- .effect_within_subset(object, var, subset_idx = idx_0,
                                   at = at, type = type, bw = bw,
-                                  q_lo = q_lo, q_hi = q_hi)
+                                  q_lo = q_lo, q_hi = q_hi, ghat = ghat)
 
   # Build subgroups table
   subgroups <- data.frame(
@@ -140,6 +144,10 @@ int <- function(...) interaction(...)
   by_var <- object$X[[by]]
   focal_type <- detect_var_type(object$X[[var]])
 
+  # Fit propensity ONCE for the focal variable — shared across subgroups
+  prop <- .fit_propensity(object$X, var, is_binary = (focal_type == "binary"))
+  ghat <- prop$ghat
+
   n_groups <- length(by_at)
   group_labels <- character(n_groups)
   group_estimates <- numeric(n_groups)
@@ -165,7 +173,8 @@ int <- function(...) interaction(...)
     group_labels[g] <- paste0(by, " in [Q", round(band[1]*100), ", Q", round(band[2]*100), "]")
     group_estimates[g] <- .effect_within_subset(object, var, subset_idx = idx_g,
                                                  at = at, type = type, bw = bw,
-                                                 q_lo = q_lo, q_hi = q_hi)
+                                                 q_lo = q_lo, q_hi = q_hi,
+                                                 ghat = ghat)
   }
 
   subgroups <- data.frame(
@@ -207,11 +216,11 @@ int <- function(...) interaction(...)
 
 #' @keywords internal
 .effect_within_subset <- function(object, var, subset_idx, at, type,
-                                   bw, q_lo, q_hi) {
+                                   bw, q_lo, q_hi, ghat = NULL) {
   focal_type <- detect_var_type(object$X[[var]])
 
   if (focal_type == "binary") {
-    return(.honest_effect_binary_subset(object, var, subset_idx))
+    return(.honest_effect_binary_subset(object, var, subset_idx, ghat = ghat))
   }
 
   x_var <- object$X[[var]]
@@ -226,6 +235,12 @@ int <- function(...) interaction(...)
 
   grid_lo <- min(a, b, unname(quantile(x_var, q_lo)))
   grid_hi <- max(a, b, unname(quantile(x_var, q_hi)))
+
+  # Fit propensity once if not provided
+  if (is.null(ghat)) {
+    prop <- .fit_propensity(object$X, var, is_binary = FALSE)
+    ghat <- prop$ghat
+  }
 
   all_estimates <- numeric(object$honesty.splits)
 
@@ -247,10 +262,12 @@ int <- function(...) interaction(...)
 
     slopes_AB <- .extract_curve_slopes(fs$rfA, object$X, object$Y,
                                         honest_idx = hon_AB, var = var,
-                                        grid = grid)
+                                        grid = grid, ghat = ghat,
+                                        object = object)
     slopes_BA <- .extract_curve_slopes(fs$rfB, object$X, object$Y,
                                         honest_idx = hon_BA, var = var,
-                                        grid = grid)
+                                        grid = grid, ghat = ghat,
+                                        object = object)
     avg_slopes <- (slopes_AB + slopes_BA) / 2
     intervals <- diff(grid)
     curve_vals <- c(0, cumsum(avg_slopes * intervals))
@@ -271,7 +288,13 @@ int <- function(...) interaction(...)
 
 
 #' @keywords internal
-.honest_effect_binary_subset <- function(object, var, subset_idx) {
+.honest_effect_binary_subset <- function(object, var, subset_idx, ghat = NULL) {
+  # Fit propensity once if not provided
+  if (is.null(ghat)) {
+    prop <- .fit_propensity(object$X, var, is_binary = TRUE)
+    ghat <- prop$ghat
+  }
+
   all_estimates <- numeric(object$honesty.splits)
 
   for (r in seq_along(object$forests)) {
@@ -280,9 +303,11 @@ int <- function(...) interaction(...)
     hon_BA <- intersect(fs$idxA, subset_idx)
 
     est_AB <- .extract_binary_one_direction(fs$rfA, object$X, object$Y,
-                                             honest_idx = hon_AB, var = var)
+                                             honest_idx = hon_AB, var = var,
+                                             ghat = ghat, object = object)
     est_BA <- .extract_binary_one_direction(fs$rfB, object$X, object$Y,
-                                             honest_idx = hon_BA, var = var)
+                                             honest_idx = hon_BA, var = var,
+                                             ghat = ghat, object = object)
     all_estimates[r] <- (est_AB + est_BA) / 2
   }
 

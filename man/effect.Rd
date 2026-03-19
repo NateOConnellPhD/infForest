@@ -17,6 +17,7 @@ effect(object, ...)
   bw = 20L,
   subset = NULL,
   propensity_trees = 2000L,
+  ghat = NULL,
   ...
 )
 }

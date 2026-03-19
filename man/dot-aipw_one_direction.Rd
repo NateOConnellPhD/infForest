@@ -2,16 +2,16 @@
 % Please edit documentation in R/effect.R
 \name{.aipw_one_direction}
 \alias{.aipw_one_direction}
-\title{AIPW scores for one fold direction
-Binary: augmented forest (forced X_j split at 0.5 in every leaf)
-Continuous: original forest (no augmentation)}
+\title{AIPW scores for one fold direction — v2: no counterfactual matrices,
+fused augmentation for binary.}
 \usage{
 .aipw_one_direction(
   rf,
-  X,
+  X_ord,
   Y,
   honest_idx,
   var,
+  col_idx,
   a,
   b,
   is_binary,
@@ -20,8 +20,7 @@ Continuous: original forest (no augmentation)}
 )
 }
 \description{
-AIPW scores for one fold direction
-Binary: augmented forest (forced X_j split at 0.5 in every leaf)
-Continuous: original forest (no augmentation)
+AIPW scores for one fold direction — v2: no counterfactual matrices,
+fused augmentation for binary.
 }
 \keyword{internal}

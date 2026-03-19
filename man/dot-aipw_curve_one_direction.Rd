@@ -2,11 +2,20 @@
 % Please edit documentation in R/effect.R
 \name{.aipw_curve_one_direction}
 \alias{.aipw_curve_one_direction}
-\title{AIPW curve slopes via aipw_curve_cpp on the original (unmodified) forest}
+\title{AIPW curve slopes via aipw_curve_v2_cpp — grid vector, no matrix copies}
 \usage{
-.aipw_curve_one_direction(rf, X, Y, honest_idx, var, grid, ghat, subset = NULL)
+.aipw_curve_one_direction(
+  rf,
+  X_ord,
+  Y,
+  honest_idx,
+  col_idx,
+  grid,
+  ghat,
+  subset = NULL
+)
 }
 \description{
-AIPW curve slopes via aipw_curve_cpp on the original (unmodified) forest
+AIPW curve slopes via aipw_curve_v2_cpp — grid vector, no matrix copies
 }
 \keyword{internal}

@@ -4,7 +4,13 @@
 \alias{.aipw_effect_binary}
 \title{Full AIPW binary effect with cross-fitting and repeated honest splits}
 \usage{
-.aipw_effect_binary(object, var, subset = NULL, propensity_trees = 2000L)
+.aipw_effect_binary(
+  object,
+  var,
+  subset = NULL,
+  propensity_trees = 2000L,
+  ghat = NULL
+)
 }
 \description{
 Full AIPW binary effect with cross-fitting and repeated honest splits

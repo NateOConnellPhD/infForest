@@ -183,12 +183,17 @@ pasr_predict <- function(object, newdata = NULL,
   )
 
   if (object$outcome_type == "continuous") {
-    if (!is.null(nuisance$sigma2_hat) && nk == n) {
+    if (nk == n) {
+      # Training data: use pre-computed sigma2
       sigma2_at_new <- nuisance$sigma2_hat
+    } else if (!is.null(nuisance$rf_scale)) {
+      # New data: predict sigma2 from the scale forest
+      sigma2_at_new <- pmax(predict(nuisance$rf_scale, data = newdata)$predictions, 1e-8)
     } else {
-      warning("Prediction intervals at new points require sigma2 estimation at those points. ",
-              "Using training-data sigma2 estimates.")
-      sigma2_at_new <- nuisance$sigma2_hat
+      # Fallback: use median training sigma2 (conservative)
+      warning("Scale forest not available in nuisance object. ",
+              "Using median training sigma2 for prediction intervals.")
+      sigma2_at_new <- rep(median(nuisance$sigma2_hat), nk)
     }
     pi_var <- sigma2_at_new + mc_var + Ct_hat
     pi_se <- sqrt(pi_var)

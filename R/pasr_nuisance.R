@@ -128,7 +128,8 @@ estimate_nuisance <- function(object, R_cf = 5L, B_loc = 1000L, B_scale = 1500L)
     # m_hat is average of the two independent estimates
     m_hat <- (mhat1 + mhat2) / 2
 
-    out <- list(outcome_type = "continuous", m_hat = m_hat, sigma2_hat = sigma2_hat)
+    out <- list(outcome_type = "continuous", m_hat = m_hat, sigma2_hat = sigma2_hat,
+                rf_scale = rf_scale)
   }
 
   class(out) <- "infForest_nuisance"

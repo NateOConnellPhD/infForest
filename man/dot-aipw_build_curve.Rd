@@ -12,7 +12,8 @@
   n_honest,
   bw,
   subset = NULL,
-  propensity_trees = 2000L
+  propensity_trees = 2000L,
+  ghat = NULL
 )
 }
 \description{

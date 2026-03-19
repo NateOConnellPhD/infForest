@@ -2,7 +2,7 @@
 % Please edit documentation in R/pasr_effect.R
 \name{pasr_effect}
 \alias{pasr_effect}
-\title{PASR for Effect Functionals}
+\title{Variance Estimation and Confidence Intervals for Effect Functionals}
 \usage{
 pasr_effect(
   object,
@@ -13,6 +13,7 @@ pasr_effect(
   q_lo = 0.1,
   q_hi = 0.9,
   subset = NULL,
+  variance_method = c("both", "sandwich", "pasr"),
   R_min = 20L,
   R_max = 200L,
   batch_size = 10L,
@@ -40,31 +41,64 @@ pasr_effect(
 
 \item{subset}{Optional subset indices for conditional resolution.}
 
+\item{variance_method}{Character: \code{"sandwich"}, \code{"pasr"}, or
+\code{"both"} (default). The sandwich estimator is computed from AIPW
+influence function scores with negligible additional cost. PASR fits
+paired forests on synthetic outcomes to estimate the covariance floor.}
+
+\item{R_min, R_max}{Minimum and maximum PASR replicates. Default 20 and 200.
+Ignored when \code{variance_method = "sandwich"}.}
+
+\item{batch_size}{PASR replicates per convergence check. Default 10.}
+
+\item{tol}{Relative change tolerance for PASR convergence. Default 0.05.}
+
+\item{n_stable}{Consecutive stable batches required. Default 2.}
+
 \item{B_mc}{Number of trees per paired forest in PASR. Default 500.}
 
 \item{alpha}{Significance level. Default 0.05.}
 
-\item{nuisance}{An \code{infForest_nuisance} object. If \code{NULL},
-estimated automatically.}
+\item{nuisance}{An \code{infForest_nuisance} object for PASR. If \code{NULL},
+estimated automatically. Ignored when \code{variance_method = "sandwich"}.}
+
+\item{verbose}{Print PASR convergence progress. Default \code{FALSE}.}
 
 \item{...}{Additional arguments passed to \code{estimate_nuisance}.}
-
-\item{R}{Number of synthetic replicates. Default 50.}
 }
 \value{
 A list of class \code{infForest_effect} with added fields:
 \describe{
-  \item{se}{Standard error of the effect estimate.}
+  \item{se}{Primary standard error (from the selected method).}
   \item{ci_lower, ci_upper}{Confidence interval.}
   \item{pval}{Two-sided p-value.}
-  \item{C_psi}{Covariance floor estimate.}
-  \item{V_psi}{Monte Carlo variance component.}
+  \item{variance_method}{Which method was used.}
+  \item{se_pasr}{PASR SE (when computed).}
+  \item{se_sandwich}{Sandwich SE (when computed).}
+  \item{C_psi}{Covariance floor estimate (PASR only).}
+  \item{V_psi}{Monte Carlo variance component (PASR only).}
+  \item{rho_V}{Diagnostic ratio sandwich/PASR (when both computed).}
 }
 }
 \description{
-Estimates the covariance floor C_Psi for any effect functional using
-scalar-first procedure-aligned synthetic resampling. Generates synthetic
-outcome replicates, fits paired inference forests on each, extracts the
-same effect functional from both, and estimates C_Psi from the
-cross-covariance of paired scalars.
+Estimates the standard error of any effect functional and constructs
+confidence intervals. Three variance estimation methods are available:
+\code{"sandwich"} (instant, from AIPW influence function scores),
+\code{"pasr"} (procedure-aligned synthetic resampling, more thorough),
+or \code{"both"} (computes both and reports the diagnostic ratio).
+}
+\examples{
+\dontrun{
+fit <- infForest(y ~ ., data = dat)
+
+# Instant SE (sandwich only, ~seconds):
+pasr_effect(fit, "trt", variance_method = "sandwich")
+
+# Full PASR only:
+pasr_effect(fit, "trt", variance_method = "pasr", verbose = TRUE)
+
+# Both (default): primary SE from PASR, sandwich for comparison
+pasr_effect(fit, "trt", verbose = TRUE)
+}
+
 }
