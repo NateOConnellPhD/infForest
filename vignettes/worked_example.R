@@ -41,18 +41,11 @@ cat("\n")
 # ============================================================
 # 1. Fit the forest
 # ============================================================
-fit <- infForest(y ~ ., data = dat_cont, num.trees = 3000,
+fit <- infForest(y ~ ., data = dat_cont, num.trees = 5000,
                  penalize = TRUE, softmax = TRUE)
 print(fit)
 
 
-ec <- effect_curve(fit, "x1", bw = 20)
-plot(ec, ylim = c(-1.2, 1.2))
-x1_ref <- ec$ref
-curve(0.8 * sin(1.5 * x) - 0.8 * sin(1.5 * x1_ref),
-      add = TRUE, col = "red", lty = 2, lwd = 2)
-legend("topleft", c("infForest", "DGM truth"),
-       col = c("black", "red"), lty = c(1, 2), lwd = 2)
 # ============================================================
 # 2. Effect estimation
 # ============================================================
@@ -75,7 +68,7 @@ eff_x2_val <- effect(fit, "x2", at = c(-1, 0, 1), type = "value")
 print(eff_x2_val)
 
 # Finer grid resolution
-eff_x2_fine <- effect(fit, "x2", bw = 50)
+eff_x2_fine <- effect(fit, "x2", bw = 10)
 print(eff_x2_fine)
 
 # Null: noise (should be near zero)
@@ -97,8 +90,20 @@ print(pe_trt)
 # ============================================================
 # 4. Non-Linear Effect curve with PASR confidence bands
 # ============================================================
+
+#Without CI
+ec <- effect_curve(fit, "x1", bw = 20, q_lo=.02, q_hi=.98)
+plot(ec, ylim = c(-1.2, 1.2))
+x1_ref <- ec$ref
+curve(0.8 * sin(1.5 * x) - 0.8 * sin(1.5 * x1_ref),
+      add = TRUE, col = "red", lty = 2, lwd = 2)
+legend("topleft", c("infForest", "DGM truth"),
+       col = c("black", "red"), lty = c(1, 2), lwd = 2)
+
+
+#W/ CI
 cat("\n=== Effect Curve with PASR Bands ===\n")
-x1_grid <- seq(quantile(x1, 0.10), quantile(x1, 0.90), length.out = 12)
+x1_grid <- seq(quantile(x1, 0.02), quantile(x1, 0.98), length.out = 12)
 
 curve_ests <- numeric(length(x1_grid))
 curve_ses  <- numeric(length(x1_grid))
@@ -114,6 +119,7 @@ for (g in seq_along(x1_grid)) {
 }
 
 
+#png("man/figures/effect_curve_x1.png", width = 600, height = 400, res = 100)
 plot(x1_grid, curve_ests, type = "l", lwd = 2,
      xlab = "x1", ylab = "Effect relative to median",
      main = "Effect curve for x1 with 95% PASR bands",
@@ -127,7 +133,7 @@ curve(0.8 * sin(1.5 * x) - 0.8 * sin(1.5 * x1_ref),
 abline(h = 0, col = "gray60", lty = 3)
 legend("topleft", c("infForest ± 95% CI", "DGM truth"),
        col = c("black", "red"), lty = c(1, 2), lwd = 2)
-
+#dev.off()
 
 # ============================================================
 # 5. Interaction estimation

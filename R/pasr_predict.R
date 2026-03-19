@@ -171,35 +171,43 @@ pasr_predict <- function(object, newdata = NULL,
   ci_var <- mc_var + Ct_hat
   ci_se <- sqrt(ci_var)
 
-  out <- data.frame(
-    f_hat = f_hat,
-    se = ci_se,
-    ci_lower = f_hat - z_crit * ci_se,
-    ci_upper = f_hat + z_crit * ci_se,
-    mc_var = mc_var,
-    Ct_hat = Ct_hat,
-    R_used = R_current,
-    converged = converged
-  )
-
   if (object$outcome_type == "continuous") {
+    # Continuous: prediction intervals only (CI for E[Y|X] invites misinterpretation)
     if (nk == n) {
-      # Training data: use pre-computed sigma2
       sigma2_at_new <- nuisance$sigma2_hat
     } else if (!is.null(nuisance$rf_scale)) {
-      # New data: predict sigma2 from the scale forest
       sigma2_at_new <- pmax(predict(nuisance$rf_scale, data = newdata)$predictions, 1e-8)
     } else {
-      # Fallback: use median training sigma2 (conservative)
       warning("Scale forest not available in nuisance object. ",
               "Using median training sigma2 for prediction intervals.")
       sigma2_at_new <- rep(median(nuisance$sigma2_hat), nk)
     }
     pi_var <- sigma2_at_new + mc_var + Ct_hat
     pi_se <- sqrt(pi_var)
-    out$pi_lower <- f_hat - z_crit * pi_se
-    out$pi_upper <- f_hat + z_crit * pi_se
-    out$sigma2_hat <- sigma2_at_new
+
+    out <- data.frame(
+      f_hat = f_hat,
+      se = pi_se,
+      pi_lower = f_hat - z_crit * pi_se,
+      pi_upper = f_hat + z_crit * pi_se,
+      sigma2_hat = sigma2_at_new,
+      mc_var = mc_var,
+      Ct_hat = Ct_hat,
+      R_used = R_current,
+      converged = converged
+    )
+  } else {
+    # Binary: confidence intervals for P(Y=1|X)
+    out <- data.frame(
+      f_hat = f_hat,
+      se = ci_se,
+      ci_lower = f_hat - z_crit * ci_se,
+      ci_upper = f_hat + z_crit * ci_se,
+      mc_var = mc_var,
+      Ct_hat = Ct_hat,
+      R_used = R_current,
+      converged = converged
+    )
   }
 
   out

@@ -362,6 +362,7 @@ List aipw_scores_v2_cpp(
             }
         } else if (is_binary) {
             // Fused inline augmentation
+            // Build per-leaf X_j-group sums for daughter means
             std::vector<double> ly_hi(n_nodes, 0.0), ly_lo(n_nodes, 0.0);
             std::vector<int> nc_hi(n_nodes, 0), nc_lo(n_nodes, 0);
             for (int j = 0; j < n_hon; j++) {
@@ -373,9 +374,25 @@ List aipw_scores_v2_cpp(
             }
             for (int j = 0; j < n_hon; j++) {
                 int i = honest_idx[j] - 1; int leaf = obs_leaf[j];
-                if (lm[leaf] != LEAF_EMPTY) { fhat_obs_sum[i] += lm[leaf]; fhat_obs_cnt[i]++; }
-                if (nc_hi[leaf] > 0) { fhat_a_sum[i] += ly_hi[leaf]/nc_hi[leaf]; fhat_a_cnt[i]++; }
-                if (nc_lo[leaf] > 0) { fhat_b_sum[i] += ly_lo[leaf]/nc_lo[leaf]; fhat_b_cnt[i]++; }
+                // Min-count guard: if either daughter has <2 obs,
+                // augmentation is variance-increasing. Fall back to unsplit.
+                if (nc_hi[leaf] < 2 || nc_lo[leaf] < 2) {
+                    if (lm[leaf] != LEAF_EMPTY) {
+                        fhat_obs_sum[i] += lm[leaf]; fhat_obs_cnt[i]++;
+                        fhat_a_sum[i]   += lm[leaf]; fhat_a_cnt[i]++;
+                        fhat_b_sum[i]   += lm[leaf]; fhat_b_cnt[i]++;
+                    }
+                } else {
+                    // Augmented: fhat_obs routes through the daughter matching
+                    // this obs's actual X_j value (consistent with augmented tree)
+                    if (Xobs_ptr[i + n * var_col] > 0.5) {
+                        fhat_obs_sum[i] += ly_hi[leaf]/nc_hi[leaf]; fhat_obs_cnt[i]++;
+                    } else {
+                        fhat_obs_sum[i] += ly_lo[leaf]/nc_lo[leaf]; fhat_obs_cnt[i]++;
+                    }
+                    fhat_a_sum[i] += ly_hi[leaf]/nc_hi[leaf]; fhat_a_cnt[i]++;
+                    fhat_b_sum[i] += ly_lo[leaf]/nc_lo[leaf]; fhat_b_cnt[i]++;
+                }
             }
         } else {
             for (int j = 0; j < n_hon; j++) {
