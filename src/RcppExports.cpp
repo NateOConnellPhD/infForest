@@ -61,8 +61,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // aipw_scores_v2_cpp
-List aipw_scores_v2_cpp(List forest, NumericMatrix X_obs, NumericVector y_honest, IntegerVector honest_idx, NumericVector ghat, int var_col, bool is_binary, double a, double b);
-RcppExport SEXP _infForest_aipw_scores_v2_cpp(SEXP forestSEXP, SEXP X_obsSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP ghatSEXP, SEXP var_colSEXP, SEXP is_binarySEXP, SEXP aSEXP, SEXP bSEXP) {
+List aipw_scores_v2_cpp(List forest, NumericMatrix X_obs, NumericVector y_honest, IntegerVector honest_idx, NumericVector ghat, int var_col, bool is_binary, double a, double b, Nullable<NumericVector> indicator_);
+RcppExport SEXP _infForest_aipw_scores_v2_cpp(SEXP forestSEXP, SEXP X_obsSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP ghatSEXP, SEXP var_colSEXP, SEXP is_binarySEXP, SEXP aSEXP, SEXP bSEXP, SEXP indicator_SEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -75,7 +75,8 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< bool >::type is_binary(is_binarySEXP);
     Rcpp::traits::input_parameter< double >::type a(aSEXP);
     Rcpp::traits::input_parameter< double >::type b(bSEXP);
-    rcpp_result_gen = Rcpp::wrap(aipw_scores_v2_cpp(forest, X_obs, y_honest, honest_idx, ghat, var_col, is_binary, a, b));
+    Rcpp::traits::input_parameter< Nullable<NumericVector> >::type indicator_(indicator_SEXP);
+    rcpp_result_gen = Rcpp::wrap(aipw_scores_v2_cpp(forest, X_obs, y_honest, honest_idx, ghat, var_col, is_binary, a, b, indicator_));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -191,7 +192,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_infForest_honest_predict_cpp", (DL_FUNC) &_infForest_honest_predict_cpp, 5},
     {"_infForest_honest_predict_loo_cpp", (DL_FUNC) &_infForest_honest_predict_loo_cpp, 4},
     {"_infForest_aipw_scores_cpp", (DL_FUNC) &_infForest_aipw_scores_cpp, 11},
-    {"_infForest_aipw_scores_v2_cpp", (DL_FUNC) &_infForest_aipw_scores_v2_cpp, 9},
+    {"_infForest_aipw_scores_v2_cpp", (DL_FUNC) &_infForest_aipw_scores_v2_cpp, 10},
     {"_infForest_aipw_curve_v2_cpp", (DL_FUNC) &_infForest_aipw_curve_v2_cpp, 8},
     {"_infForest_aipw_curve_cpp", (DL_FUNC) &_infForest_aipw_curve_cpp, 9},
     {"_infForest_augment_forest_with_splits", (DL_FUNC) &_infForest_augment_forest_with_splits, 7},

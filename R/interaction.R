@@ -50,13 +50,20 @@ interaction.infForest <- function(object, var, by,
                                   by_at = list(c(0.10, 0.25), c(0.75, 0.90)),
                                   bw = 20L,
                                   q_lo = 0.10, q_hi = 0.90,
-                                  subset = NULL, ...) {
+                                  subset = NULL,
+                                  variance = c("sandwich", "pasr", "both"),
+                                  ci = TRUE, alpha = 0.05,
+                                  R_min = 20L, R_max = 200L,
+                                  batch_size = 10L, tol = 0.05,
+                                  n_stable = 2L, B_mc = 500L,
+                                  nuisance = NULL, verbose = FALSE, ...) {
 
   check_infForest(object)
   check_varname(object, var)
   check_varname(object, by)
 
   type <- match.arg(type)
+  variance <- match.arg(variance)
 
   by_var <- object$X[[by]]
   by_type <- detect_var_type(by_var)
@@ -64,7 +71,12 @@ interaction.infForest <- function(object, var, by,
   if (by_type == "binary") {
     result <- .interaction_by_binary(object, var, by, at = at, type = type,
                                      bw = bw, q_lo = q_lo, q_hi = q_hi,
-                                     subset = subset)
+                                     subset = subset,
+                                     variance = variance, ci = ci, alpha = alpha,
+                                     R_min = R_min, R_max = R_max,
+                                     batch_size = batch_size, tol = tol,
+                                     n_stable = n_stable, B_mc = B_mc,
+                                     nuisance = nuisance, verbose = verbose)
   } else if (by_type == "continuous") {
     result <- .interaction_by_continuous(object, var, by, at = at, type = type,
                                          by_at = by_at, bw = bw,
@@ -83,25 +95,26 @@ int <- function(...) interaction(...)
 
 #' @keywords internal
 .interaction_by_binary <- function(object, var, by, at, type, bw, q_lo, q_hi,
-                                   subset = NULL) {
+                                   subset = NULL,
+                                   variance = "sandwich", ci = TRUE, alpha = 0.05,
+                                   R_min = 20L, R_max = 200L,
+                                   batch_size = 10L, tol = 0.05,
+                                   n_stable = 2L, B_mc = 500L,
+                                   nuisance = NULL, verbose = FALSE) {
 
   by_var <- object$X[[by]]
   idx_1 <- which(by_var == 1)
   idx_0 <- which(by_var == 0)
 
-  # Intersect with external subset if provided
   if (!is.null(subset)) {
     idx_1 <- intersect(idx_1, subset)
     idx_0 <- intersect(idx_0, subset)
   }
 
   focal_type <- detect_var_type(object$X[[var]])
-
-  # Fit propensity ONCE for the focal variable — shared across subgroups
   prop <- .fit_propensity(object$X, var, is_binary = (focal_type == "binary"))
   ghat <- prop$ghat
 
-  # Compute effect within each by-group, passing cached ghat
   eff_1 <- .effect_within_subset(object, var, subset_idx = idx_1,
                                   at = at, type = type, bw = bw,
                                   q_lo = q_lo, q_hi = q_hi, ghat = ghat)
@@ -109,14 +122,12 @@ int <- function(...) interaction(...)
                                   at = at, type = type, bw = bw,
                                   q_lo = q_lo, q_hi = q_hi, ghat = ghat)
 
-  # Build subgroups table
   subgroups <- data.frame(
     subgroup = c(paste0(by, " = 1"), paste0(by, " = 0")),
     estimate = c(eff_1, eff_0),
     stringsAsFactors = FALSE
   )
 
-  # Pairwise differences
   differences <- data.frame(
     hi = paste0(by, " = 1"),
     lo = paste0(by, " = 0"),
@@ -125,13 +136,58 @@ int <- function(...) interaction(...)
   )
 
   out <- list(
-    variable = var,
-    by = by,
-    var_type = focal_type,
-    by_type = "binary",
-    subgroups = subgroups,
-    differences = differences
+    variable = var, by = by,
+    var_type = focal_type, by_type = "binary",
+    subgroups = subgroups, differences = differences
   )
+
+  # --- CIs ---
+  if (ci) {
+    do_sandwich <- variance %in% c("sandwich", "both")
+    do_pasr     <- variance %in% c("pasr", "both")
+    z_crit <- qnorm(1 - alpha / 2)
+
+    se_sand_diff <- NULL
+    if (do_sandwich) {
+      sand_1 <- .compute_sandwich_se(object, var, at = at, type = type,
+                                      bw = bw, q_lo = q_lo, q_hi = q_hi,
+                                      subset = idx_1, ghat = ghat)
+      sand_0 <- .compute_sandwich_se(object, var, at = at, type = type,
+                                      bw = bw, q_lo = q_lo, q_hi = q_hi,
+                                      subset = idx_0, ghat = ghat)
+      se_1 <- sand_1$se; se_0 <- sand_0$se
+      se_sand_diff <- sqrt(se_1^2 + se_0^2)
+      out$se_sandwich <- se_sand_diff
+      out$subgroups$se <- c(se_1, se_0)
+      out$subgroups$ci_lower <- out$subgroups$estimate - z_crit * c(se_1, se_0)
+      out$subgroups$ci_upper <- out$subgroups$estimate + z_crit * c(se_1, se_0)
+    }
+
+    se_pasr_diff <- NULL
+    if (do_pasr) {
+      pasr_result <- .compute_pasr_int_se(
+        object, var, by, at = at, type = type,
+        bw = bw, q_lo = q_lo, q_hi = q_hi, subset = subset,
+        R_min = R_min, R_max = R_max, batch_size = batch_size,
+        tol = tol, n_stable = n_stable, B_mc = B_mc,
+        nuisance = nuisance, verbose = verbose)
+      se_pasr_diff <- pasr_result$se
+      out$se_pasr <- se_pasr_diff
+      out$C_psi <- pasr_result$C_psi
+    }
+
+    se_primary <- if (!is.null(se_pasr_diff)) se_pasr_diff else se_sand_diff
+    out$se <- se_primary
+    out$alpha <- alpha
+    out$variance_method <- variance
+    out$differences$se <- se_primary
+    out$differences$ci_lower <- out$differences$difference - z_crit * se_primary
+    out$differences$ci_upper <- out$differences$difference + z_crit * se_primary
+
+    if (!is.null(se_pasr_diff) && !is.null(se_sand_diff))
+      out$rho_V <- se_sand_diff^2 / se_pasr_diff^2
+  }
+
   class(out) <- "infForest_interaction"
   out
 }
@@ -325,17 +381,34 @@ print.infForest_interaction <- function(x, ...) {
   cat("  Variable:  ", x$variable, "\n")
   cat("  By:        ", x$by, "(", x$by_type, ")\n\n")
 
+  pct <- round((1 - (if (!is.null(x$alpha)) x$alpha else 0.05)) * 100)
+
   cat("  Subgroup effects:\n")
   for (k in seq_len(nrow(x$subgroups))) {
     unit_label <- if (x$var_type == "continuous") "  (per unit)" else ""
-    cat(sprintf("    %-30s  %8.4f%s\n",
-                x$subgroups$subgroup[k], x$subgroups$estimate[k], unit_label))
+    line <- sprintf("    %-30s  %8.4f%s",
+                    x$subgroups$subgroup[k], x$subgroups$estimate[k], unit_label)
+    if ("se" %in% names(x$subgroups) && !is.na(x$subgroups$se[k]))
+      line <- paste0(line, sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])",
+                                    x$subgroups$se[k], pct,
+                                    x$subgroups$ci_lower[k], x$subgroups$ci_upper[k]))
+    cat(line, "\n")
   }
 
   cat("\n  Pairwise differences:\n")
   for (k in seq_len(nrow(x$differences))) {
-    cat(sprintf("    %-30s vs %-30s  %8.4f\n",
-                x$differences$hi[k], x$differences$lo[k], x$differences$difference[k]))
+    line <- sprintf("    %-20s vs %-20s  %8.4f",
+                    x$differences$hi[k], x$differences$lo[k], x$differences$difference[k])
+    if ("se" %in% names(x$differences) && !is.na(x$differences$se[k]))
+      line <- paste0(line, sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])",
+                                    x$differences$se[k], pct,
+                                    x$differences$ci_lower[k], x$differences$ci_upper[k]))
+    cat(line, "\n")
   }
+
+  if (!is.null(x$rho_V))
+    cat(sprintf("\n  rho_V: %.2f\n", x$rho_V))
+
   invisible(x)
 }
+

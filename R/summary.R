@@ -39,9 +39,12 @@
 #'
 #' @export
 summary.infForest <- function(object, vars = NULL, type = "quantile",
-                              bw = 20L, q_lo = 0.10, q_hi = 0.90, ...) {
+                              bw = 20L, q_lo = 0.10, q_hi = 0.90,
+                              variance = c("sandwich", "pasr", "both"),
+                              ci = TRUE, alpha = 0.05, ...) {
 
   check_infForest(object)
+  variance <- match.arg(variance)
 
 
   if (is.null(vars)) {
@@ -101,17 +104,11 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
     }
   }
 
-  # Batch all binary main effects in one pass
+  # Batch all binary main effects
   if (length(binary_main_vars) > 0) {
-    bin_estimates <- .honest_effect_binary_multi(object, binary_main_vars)
     for (v in binary_main_vars) {
-      results[[v]] <- list(
-        variable = v,
-        var_type = "binary",
-        estimate = bin_estimates[v],
-        n_intervals = 1L
-      )
-      class(results[[v]]) <- "infForest_effect"
+      results[[v]] <- effect(object, v, variance = variance, ci = ci,
+                             alpha = alpha, bw = bw)
     }
   }
 
@@ -121,7 +118,8 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
     v_type <- .get_type(v)
     at <- if (!is.null(spec$at)) spec$at else c(0.25, 0.75)
     results[[v]] <- effect(object, v, at = at, type = v_type,
-                           bw = bw, q_lo = q_lo, q_hi = q_hi)
+                           bw = bw, q_lo = q_lo, q_hi = q_hi,
+                           variance = variance, ci = ci, alpha = alpha)
   }
 
   # Interactions
@@ -140,13 +138,15 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
     if (by_var_type == "binary") {
       results[[label]] <- int(object, focal, by = by_var,
                               at = focal_at, type = focal_type,
-                              bw = bw, q_lo = q_lo, q_hi = q_hi)
+                              bw = bw, q_lo = q_lo, q_hi = q_hi,
+                              variance = variance, ci = ci, alpha = alpha)
     } else {
       by_at <- if (!is.null(spec$by_at)) spec$by_at else list(c(0.10, 0.25), c(0.75, 0.90))
       results[[label]] <- int(object, focal, by = by_var,
                               at = focal_at, type = focal_type,
                               by_at = by_at,
-                              bw = bw, q_lo = q_lo, q_hi = q_hi)
+                              bw = bw, q_lo = q_lo, q_hi = q_hi,
+                              variance = variance, ci = ci, alpha = alpha)
     }
   }
 
@@ -356,7 +356,7 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
     at <- as.numeric(strsplit(inside, ",")[[1]])
     if (any(is.na(at))) {
       stop(paste0("Could not parse values in '", term,
-                   "'. Use numeric values separated by commas."))
+                  "'. Use numeric values separated by commas."))
     }
     list(var = var, at = at)
   } else {
@@ -372,39 +372,54 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
 #' @export
 print.infForest_summary <- function(x, ...) {
   cat("Inference Forest Effect Summary\n")
-  cat(paste(rep("-", 65), collapse = ""), "\n")
+  cat(paste(rep("-", 75), collapse = ""), "\n")
 
   for (nm in names(x$effects)) {
     eff <- x$effects[[nm]]
 
     if (inherits(eff, "infForest_interaction")) {
-      # Interaction result
       cat(sprintf("  %s  (interaction: %s by %s)\n", nm, eff$variable, eff$by))
       for (k in seq_len(nrow(eff$subgroups))) {
         unit_label <- if (eff$var_type == "continuous") " (per unit)" else ""
-        cat(sprintf("    %-35s  %8.4f%s\n",
-                    eff$subgroups$subgroup[k], eff$subgroups$estimate[k], unit_label))
+        line <- sprintf("    %-35s  %8.4f%s",
+                        eff$subgroups$subgroup[k], eff$subgroups$estimate[k], unit_label)
+        if ("se" %in% names(eff$subgroups) && !is.na(eff$subgroups$se[k]))
+          line <- paste0(line, sprintf("  (SE: %.4f)", eff$subgroups$se[k]))
+        cat(line, "\n")
       }
       for (k in seq_len(nrow(eff$differences))) {
-        cat(sprintf("    Diff: %-50s  %8.4f\n",
-                    paste(eff$differences$hi[k], "vs", eff$differences$lo[k]),
-                    eff$differences$difference[k]))
+        line <- sprintf("    Diff: %-40s  %8.4f",
+                        paste(eff$differences$hi[k], "-", eff$differences$lo[k]),
+                        eff$differences$difference[k])
+        if ("se" %in% names(eff$differences) && !is.na(eff$differences$se[k]))
+          line <- paste0(line, sprintf("  (SE: %.4f, 95%% CI: [%.4f, %.4f])",
+                                       eff$differences$se[k],
+                                       eff$differences$ci_lower[k],
+                                       eff$differences$ci_upper[k]))
+        cat(line, "\n")
       }
 
     } else if (inherits(eff, "infForest_effect")) {
       if (eff$var_type == "binary") {
-        cat(sprintf("  %-15s  binary      %8.4f\n", nm, eff$estimate))
+        line <- sprintf("  %-15s  binary      %8.4f", nm, eff$estimate)
+        if (!is.null(eff$se))
+          line <- paste0(line, sprintf("  (SE: %.4f, 95%% CI: [%.4f, %.4f])",
+                                       eff$se, eff$ci_lower, eff$ci_upper))
+        cat(line, "\n")
       } else {
         df <- eff$contrasts
         for (k in seq_len(nrow(df))) {
           label <- if (k == 1) sprintf("%-15s", nm) else sprintf("%-15s", "")
-          cat(sprintf("  %s  %s vs %s  %8.4f  (per unit)\n",
-                      label, df$hi[k], df$lo[k], df$estimate[k]))
+          line <- sprintf("  %s  %-16s  %8.4f  (per unit)", label, df$contrast[k], df$estimate[k])
+          if ("se" %in% names(df) && !is.na(df$se[k]))
+            line <- paste0(line, sprintf("  (SE: %.4f, 95%% CI: [%.4f, %.4f])",
+                                         df$se[k], df$ci_lower[k], df$ci_upper[k]))
+          cat(line, "\n")
         }
       }
     }
   }
 
-  cat(paste(rep("-", 65), collapse = ""), "\n")
+  cat(paste(rep("-", 75), collapse = ""), "\n")
   invisible(x)
 }

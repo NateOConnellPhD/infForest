@@ -16,8 +16,19 @@ effect(object, ...)
   q_hi = 0.9,
   bw = 20L,
   subset = NULL,
+  variance = c("sandwich", "pasr", "both"),
+  ci = TRUE,
+  alpha = 0.05,
   propensity_trees = 2000L,
   ghat = NULL,
+  R_min = 20L,
+  R_max = 200L,
+  batch_size = 10L,
+  tol = 0.05,
+  n_stable = 2L,
+  B_mc = 500L,
+  nuisance = NULL,
+  verbose = FALSE,
   ...
 )
 }

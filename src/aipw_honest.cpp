@@ -293,7 +293,8 @@ List aipw_scores_cpp(
 List aipw_scores_v2_cpp(
     List forest, NumericMatrix X_obs, NumericVector y_honest,
     IntegerVector honest_idx, NumericVector ghat,
-    int var_col, bool is_binary, double a, double b
+    int var_col, bool is_binary, double a, double b,
+    Nullable<NumericVector> indicator_ = R_NilValue
 ) {
     List svl = forest["split.varIDs"];
     List svall = forest["split.values"];
@@ -303,6 +304,15 @@ List aipw_scores_v2_cpp(
     const double* y_ptr = REAL(y_honest);
     const double* g_ptr = REAL(ghat);
     int n_hon = honest_idx.size();
+
+    // Optional indicator vector for HT weights (categorical predictors)
+    bool has_indicator = indicator_.isNotNull();
+    NumericVector indicator_vec;
+    const double* ind_ptr = nullptr;
+    if (has_indicator) {
+        indicator_vec = as<NumericVector>(indicator_);
+        ind_ptr = REAL(indicator_vec);
+    }
 
     std::vector<std::vector<int>> all_sv(B), all_lc(B), all_rc(B);
     std::vector<std::vector<double>> all_sval(B);
@@ -393,7 +403,7 @@ List aipw_scores_v2_cpp(
         double fo = (fhat_obs_cnt[i]>0) ? fhat_obs_sum[i]/fhat_obs_cnt[i] : NA_REAL;
         if (ISNA(fa)||ISNA(fb)||ISNA(fo)) { phi[j]=NA_REAL; continue; }
         double pc = fa - fb, res = y_ptr[i] - fo;
-        double xj = Xobs_ptr[i+n*var_col], gi = g_ptr[i], w, co;
+        double xj = has_indicator ? ind_ptr[i] : Xobs_ptr[i+n*var_col]; double gi = g_ptr[i], w, co;
         if (is_binary) { double gc = std::max(0.025,std::min(0.975,gi)); w = (xj-gc)/(gc*(1.0-gc)); co = w*res; }
         else { double ej = xj-gi; w = ej/sigma2_ej; co = w*res*(a-b); }
         phi[j] = pc + co; sum_pc += pc; sum_co += co; psi_sum += phi[j]; psi_cnt++;
