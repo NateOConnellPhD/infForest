@@ -2,18 +2,17 @@
 % Please edit documentation in R/effect.R
 \name{.fit_propensity}
 \alias{.fit_propensity}
-\title{Fit propensity model: predict X_j from X_{-j} using penalized regression}
+\title{Fit propensity model: predict X_j from X_{-j} using LOO ridge}
 \usage{
 .fit_propensity(X, var, is_binary, n_trees = NULL)
 }
 \description{
-For continuous X_j: ridge regression (alpha=0), penalty by CV.
-For binary X_j: logistic ridge (alpha=0, family="binomial"), penalty by CV.
+For continuous X_j: ridge regression with leave-one-out predictions via
+the PRESS formula. LOO ensures Cov(ghat, e_j) = 0, which eliminates the
+propensity attenuation factor (lambda = 1 exactly).
 }
 \details{
-Ridge avoids the spurious variation of forest OOB propensities at small n.
-When X_j is independent of X_{-j}, the penalty shrinks all coefficients
-toward zero, returning ghat ≈ constant (the marginal mean/prevalence).
-When X_j is confounded, the real association survives the penalty.
+For binary X_j: logistic ridge with K-fold cross-validated predictions.
+Observation k's prediction never uses observation k in the fit.
 }
 \keyword{internal}

@@ -154,31 +154,59 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   reorder_X_to_ranger(object$X, rf)
 }
 
-#' Fit propensity model: predict X_j from X_{-j} using penalized regression
+#' Fit propensity model: predict X_j from X_{-j} using LOO ridge
 #'
-#' For continuous X_j: ridge regression (alpha=0), penalty by CV.
-#' For binary X_j: logistic ridge (alpha=0, family="binomial"), penalty by CV.
+#' For continuous X_j: ridge regression with leave-one-out predictions via
+#' the PRESS formula. LOO ensures Cov(ghat, e_j) = 0, which eliminates the
+#' propensity attenuation factor (lambda = 1 exactly).
 #'
-#' Ridge avoids the spurious variation of forest OOB propensities at small n.
-#' When X_j is independent of X_{-j}, the penalty shrinks all coefficients
-#' toward zero, returning ghat ≈ constant (the marginal mean/prevalence).
-#' When X_j is confounded, the real association survives the penalty.
+#' For binary X_j: logistic ridge with K-fold cross-validated predictions.
+#' Observation k's prediction never uses observation k in the fit.
 #'
 #' @keywords internal
 .fit_propensity <- function(X, var, is_binary, n_trees = NULL) {
   var_col_r <- which(names(X) == var)
-  X_minus_j <- as.matrix(X[, -var_col_r, drop = FALSE])
+  Xm <- as.matrix(X[, -var_col_r, drop = FALSE])
   x_j <- X[[var]]
+  n <- length(x_j)
+  p <- ncol(Xm)
 
   if (is_binary) {
-    cv_fit <- glmnet::cv.glmnet(X_minus_j, x_j, alpha = 0,
+    # Binary: K-fold logistic ridge, predictions are out-of-fold
+    K <- 10L
+    cv_fit <- glmnet::cv.glmnet(Xm, x_j, alpha = 0,
                                  family = "binomial", nfolds = 5)
-    ghat <- as.numeric(predict(cv_fit, X_minus_j,
-                                s = "lambda.min", type = "response"))
+    lambda_use <- cv_fit$lambda.min
+
+    folds <- sample(rep(seq_len(K), length.out = n))
+    ghat <- numeric(n)
+    for (fold in seq_len(K)) {
+      train <- which(folds != fold)
+      test  <- which(folds == fold)
+      fit_k <- glmnet::glmnet(Xm[train, , drop = FALSE], x_j[train],
+                               alpha = 0, family = "binomial",
+                               lambda = lambda_use)
+      ghat[test] <- as.numeric(predict(fit_k, Xm[test, , drop = FALSE],
+                                        type = "response"))
+    }
     ghat <- pmax(pmin(ghat, 0.975), 0.025)
+
   } else {
-    cv_fit <- glmnet::cv.glmnet(X_minus_j, x_j, alpha = 0, nfolds = 5)
-    ghat <- as.numeric(predict(cv_fit, X_minus_j, s = "lambda.min"))
+    # Continuous: ridge LOO via PRESS formula
+    # ghat_LOO(k) = x_j(k) - e_insample(k) / (1 - h_kk)
+    cv_fit <- glmnet::cv.glmnet(Xm, x_j, alpha = 0, nfolds = 5)
+    lambda_use <- cv_fit$lambda.min
+
+    ghat_insample <- as.numeric(predict(cv_fit, Xm, s = lambda_use))
+    e_insample <- x_j - ghat_insample
+
+    # Hat matrix diagonal: h_kk = diag(X (X'X + lambda I)^{-1} X')
+    XtX_ridge_inv <- solve(crossprod(Xm) + lambda_use * diag(p))
+    H_diag <- rowSums((Xm %*% XtX_ridge_inv) * Xm)
+
+    # LOO predictions
+    e_loo <- e_insample / (1 - H_diag)
+    ghat <- x_j - e_loo
   }
 
   list(fit = cv_fit, ghat = ghat)
