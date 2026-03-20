@@ -5,9 +5,11 @@
 //   - obs_leaf cache: leaf assignment from honest routing reused for fhat_obs
 //   - Flat vector leaf means: std::vector indexed by node ID replaces
 //     unordered_map. Eliminates hash lookups in the hot inner loop.
-//   - Non-splitting tree skip (scores + curve)
-//   - Fused augmentation for binary (aipw_scores_v2_cpp)
-//   - Grid vector routing (aipw_curve_v2_cpp)
+//   - Non-splitting tree skip (scores + curve): trees without var_col splits
+//     contribute fhat_a == fhat_b == fhat_obs (contrast = 0, AIPW does the work)
+//   - Value-override routing (aipw_scores_v2_cpp, aipw_curve_v2_cpp):
+//     counterfactual routing overrides sv[node]==var_col with query value,
+//     eliminating counterfactual matrix copies
 
 #include <Rcpp.h>
 #include <vector>
@@ -284,7 +286,7 @@ List aipw_scores_cpp(
 
 
 // ============================================================
-// aipw_scores_v2_cpp — no counterfactual matrices, fused augmentation
+// aipw_scores_v2_cpp — no counterfactual matrices, value-override routing
 // ============================================================
 
 // [[Rcpp::export]]
@@ -360,41 +362,9 @@ List aipw_scores_v2_cpp(
                       node = (xv <= sval[node]) ? lc[node] : rc[node]; }
                   if (lm[node] != LEAF_EMPTY) { fhat_b_sum[i] += lm[node]; fhat_b_cnt[i]++; } }
             }
-        } else if (is_binary) {
-            // Fused inline augmentation
-            // Build per-leaf X_j-group sums for daughter means
-            std::vector<double> ly_hi(n_nodes, 0.0), ly_lo(n_nodes, 0.0);
-            std::vector<int> nc_hi(n_nodes, 0), nc_lo(n_nodes, 0);
-            for (int j = 0; j < n_hon; j++) {
-                int i = honest_idx[j] - 1; double yi = y_ptr[i];
-                if (ISNA(yi)) continue;
-                int leaf = obs_leaf[j];
-                if (Xobs_ptr[i + n * var_col] > 0.5) { ly_hi[leaf] += yi; nc_hi[leaf]++; }
-                else                                   { ly_lo[leaf] += yi; nc_lo[leaf]++; }
-            }
-            for (int j = 0; j < n_hon; j++) {
-                int i = honest_idx[j] - 1; int leaf = obs_leaf[j];
-                // Min-count guard: if either daughter has <2 obs,
-                // augmentation is variance-increasing. Fall back to unsplit.
-                if (nc_hi[leaf] < 2 || nc_lo[leaf] < 2) {
-                    if (lm[leaf] != LEAF_EMPTY) {
-                        fhat_obs_sum[i] += lm[leaf]; fhat_obs_cnt[i]++;
-                        fhat_a_sum[i]   += lm[leaf]; fhat_a_cnt[i]++;
-                        fhat_b_sum[i]   += lm[leaf]; fhat_b_cnt[i]++;
-                    }
-                } else {
-                    // Augmented: fhat_obs routes through the daughter matching
-                    // this obs's actual X_j value (consistent with augmented tree)
-                    if (Xobs_ptr[i + n * var_col] > 0.5) {
-                        fhat_obs_sum[i] += ly_hi[leaf]/nc_hi[leaf]; fhat_obs_cnt[i]++;
-                    } else {
-                        fhat_obs_sum[i] += ly_lo[leaf]/nc_lo[leaf]; fhat_obs_cnt[i]++;
-                    }
-                    fhat_a_sum[i] += ly_hi[leaf]/nc_hi[leaf]; fhat_a_cnt[i]++;
-                    fhat_b_sum[i] += ly_lo[leaf]/nc_lo[leaf]; fhat_b_cnt[i]++;
-                }
-            }
         } else {
+            // NON-SPLITTING TREE (binary or continuous): all routes identical.
+            // Prediction contrast = 0; AIPW correction does the work.
             for (int j = 0; j < n_hon; j++) {
                 int i = honest_idx[j] - 1; int leaf = obs_leaf[j];
                 if (lm[leaf] != LEAF_EMPTY) {

@@ -154,37 +154,34 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   reorder_X_to_ranger(object$X, rf)
 }
 
-#' Fit propensity model: predict X_j from X_{-j} using OOB predictions
+#' Fit propensity model: predict X_j from X_{-j} using penalized regression
+#'
+#' For continuous X_j: ridge regression (alpha=0), penalty by CV.
+#' For binary X_j: logistic ridge (alpha=0, family="binomial"), penalty by CV.
+#'
+#' Ridge avoids the spurious variation of forest OOB propensities at small n.
+#' When X_j is independent of X_{-j}, the penalty shrinks all coefficients
+#' toward zero, returning ghat ≈ constant (the marginal mean/prevalence).
+#' When X_j is confounded, the real association survives the penalty.
+#'
 #' @keywords internal
-.fit_propensity <- function(X, var, is_binary, n_trees = 2000L) {
+.fit_propensity <- function(X, var, is_binary, n_trees = NULL) {
   var_col_r <- which(names(X) == var)
-  X_minus_j <- X[, -var_col_r, drop = FALSE]
+  X_minus_j <- as.matrix(X[, -var_col_r, drop = FALSE])
   x_j <- X[[var]]
 
   if (is_binary) {
-    df_prop <- data.frame(xj = factor(x_j, levels = c(0, 1)), X_minus_j)
-    prop_rf <- inf.ranger::ranger(
-      xj ~ ., data = df_prop,
-      num.trees = n_trees, probability = TRUE,
-      min.node.size = 10L,
-      mtry = max(1L, floor(sqrt(ncol(X_minus_j)))),
-      replace = TRUE
-    )
-    ghat <- prop_rf$predictions[, 2]
+    cv_fit <- glmnet::cv.glmnet(X_minus_j, x_j, alpha = 0,
+                                 family = "binomial", nfolds = 5)
+    ghat <- as.numeric(predict(cv_fit, X_minus_j,
+                                s = "lambda.min", type = "response"))
     ghat <- pmax(pmin(ghat, 0.975), 0.025)
   } else {
-    df_prop <- data.frame(xj = x_j, X_minus_j)
-    prop_rf <- inf.ranger::ranger(
-      xj ~ ., data = df_prop,
-      num.trees = n_trees,
-      min.node.size = 10L,
-      mtry = max(1L, floor(sqrt(ncol(X_minus_j)))),
-      replace = TRUE
-    )
-    ghat <- prop_rf$predictions
+    cv_fit <- glmnet::cv.glmnet(X_minus_j, x_j, alpha = 0, nfolds = 5)
+    ghat <- as.numeric(predict(cv_fit, X_minus_j, s = "lambda.min"))
   }
 
-  list(rf = prop_rf, ghat = ghat)
+  list(fit = cv_fit, ghat = ghat)
 }
 
 
