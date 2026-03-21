@@ -353,10 +353,15 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
   if (grepl("\\[", term)) {
     var <- sub("\\[.*", "", term)
     inside <- sub(".*\\[(.*)\\]", "\\1", term)
-    at <- as.numeric(strsplit(inside, ",")[[1]])
-    if (any(is.na(at))) {
-      stop(paste0("Could not parse values in '", term,
-                  "'. Use numeric values separated by commas."))
+    # Strip quotes and whitespace from each element
+    raw <- strsplit(inside, ",")[[1]]
+    raw <- trimws(gsub("[\"']", "", raw))
+    # Try numeric first; if any fail, treat all as character (level names)
+    at_num <- suppressWarnings(as.numeric(raw))
+    if (any(is.na(at_num))) {
+      at <- raw  # character level names
+    } else {
+      at <- at_num
     }
     list(var = var, at = at)
   } else {
@@ -393,9 +398,9 @@ print.infForest_summary <- function(x, ...) {
                         eff$differences$difference[k])
         if ("se" %in% names(eff$differences) && !is.na(eff$differences$se[k]))
           line <- paste0(line, sprintf("  (SE: %.4f, 95%% CI: [%.4f, %.4f])",
-                                       eff$differences$se[k],
-                                       eff$differences$ci_lower[k],
-                                       eff$differences$ci_upper[k]))
+                                        eff$differences$se[k],
+                                        eff$differences$ci_lower[k],
+                                        eff$differences$ci_upper[k]))
         cat(line, "\n")
       }
 
@@ -404,7 +409,7 @@ print.infForest_summary <- function(x, ...) {
         line <- sprintf("  %-15s  binary      %8.4f", nm, eff$estimate)
         if (!is.null(eff$se))
           line <- paste0(line, sprintf("  (SE: %.4f, 95%% CI: [%.4f, %.4f])",
-                                       eff$se, eff$ci_lower, eff$ci_upper))
+                                        eff$se, eff$ci_lower, eff$ci_upper))
         cat(line, "\n")
       } else {
         df <- eff$contrasts
@@ -413,7 +418,7 @@ print.infForest_summary <- function(x, ...) {
           line <- sprintf("  %s  %-16s  %8.4f  (per unit)", label, df$contrast[k], df$estimate[k])
           if ("se" %in% names(df) && !is.na(df$se[k]))
             line <- paste0(line, sprintf("  (SE: %.4f, 95%% CI: [%.4f, %.4f])",
-                                         df$se[k], df$ci_lower[k], df$ci_upper[k]))
+                                          df$se[k], df$ci_lower[k], df$ci_upper[k]))
           cat(line, "\n")
         }
       }

@@ -10,6 +10,37 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// precompute_forest_cache_cpp
+List precompute_forest_cache_cpp(List forest, NumericMatrix X_obs, NumericVector y_honest, IntegerVector honest_idx);
+RcppExport SEXP _infForest_precompute_forest_cache_cpp(SEXP forestSEXP, SEXP X_obsSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type forest(forestSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_obs(X_obsSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y_honest(y_honestSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type honest_idx(honest_idxSEXP);
+    rcpp_result_gen = Rcpp::wrap(precompute_forest_cache_cpp(forest, X_obs, y_honest, honest_idx));
+    return rcpp_result_gen;
+END_RCPP
+}
+// aipw_scores_cached_cpp
+List aipw_scores_cached_cpp(List cache, NumericVector ghat, int var_col, bool is_binary, double a, double b, Nullable<NumericVector> indicator_);
+RcppExport SEXP _infForest_aipw_scores_cached_cpp(SEXP cacheSEXP, SEXP ghatSEXP, SEXP var_colSEXP, SEXP is_binarySEXP, SEXP aSEXP, SEXP bSEXP, SEXP indicator_SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type cache(cacheSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type ghat(ghatSEXP);
+    Rcpp::traits::input_parameter< int >::type var_col(var_colSEXP);
+    Rcpp::traits::input_parameter< bool >::type is_binary(is_binarySEXP);
+    Rcpp::traits::input_parameter< double >::type a(aSEXP);
+    Rcpp::traits::input_parameter< double >::type b(bSEXP);
+    Rcpp::traits::input_parameter< Nullable<NumericVector> >::type indicator_(indicator_SEXP);
+    rcpp_result_gen = Rcpp::wrap(aipw_scores_cached_cpp(cache, ghat, var_col, is_binary, a, b, indicator_));
+    return rcpp_result_gen;
+END_RCPP
+}
 // honest_predict_cpp
 NumericVector honest_predict_cpp(List forest, NumericMatrix X_query, NumericMatrix X_honest, NumericVector y_honest, IntegerVector honest_idx);
 RcppExport SEXP _infForest_honest_predict_cpp(SEXP forestSEXP, SEXP X_querySEXP, SEXP X_honestSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP) {
@@ -134,6 +165,42 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// debug_compare_scorers
+List debug_compare_scorers(List cache, List forest, NumericMatrix X_obs, NumericVector y_honest, IntegerVector honest_idx, NumericVector ghat, int var_col, double val_a, double val_b, int check_tree);
+RcppExport SEXP _infForest_debug_compare_scorers(SEXP cacheSEXP, SEXP forestSEXP, SEXP X_obsSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP ghatSEXP, SEXP var_colSEXP, SEXP val_aSEXP, SEXP val_bSEXP, SEXP check_treeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type cache(cacheSEXP);
+    Rcpp::traits::input_parameter< List >::type forest(forestSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X_obs(X_obsSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y_honest(y_honestSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type honest_idx(honest_idxSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type ghat(ghatSEXP);
+    Rcpp::traits::input_parameter< int >::type var_col(var_colSEXP);
+    Rcpp::traits::input_parameter< double >::type val_a(val_aSEXP);
+    Rcpp::traits::input_parameter< double >::type val_b(val_bSEXP);
+    Rcpp::traits::input_parameter< int >::type check_tree(check_treeSEXP);
+    rcpp_result_gen = Rcpp::wrap(debug_compare_scorers(cache, forest, X_obs, y_honest, honest_idx, ghat, var_col, val_a, val_b, check_tree));
+    return rcpp_result_gen;
+END_RCPP
+}
+// debug_tree_walk
+List debug_tree_walk(List cache, int var_col, double val_a, double val_b, int tree_idx, int obs_idx);
+RcppExport SEXP _infForest_debug_tree_walk(SEXP cacheSEXP, SEXP var_colSEXP, SEXP val_aSEXP, SEXP val_bSEXP, SEXP tree_idxSEXP, SEXP obs_idxSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< List >::type cache(cacheSEXP);
+    Rcpp::traits::input_parameter< int >::type var_col(var_colSEXP);
+    Rcpp::traits::input_parameter< double >::type val_a(val_aSEXP);
+    Rcpp::traits::input_parameter< double >::type val_b(val_bSEXP);
+    Rcpp::traits::input_parameter< int >::type tree_idx(tree_idxSEXP);
+    Rcpp::traits::input_parameter< int >::type obs_idx(obs_idxSEXP);
+    rcpp_result_gen = Rcpp::wrap(debug_tree_walk(cache, var_col, val_a, val_b, tree_idx, obs_idx));
+    return rcpp_result_gen;
+END_RCPP
+}
 // honest_all
 List honest_all(List forest, NumericMatrix X_num, NumericVector y_honest, IntegerVector honest_idx, IntegerVector bin_cols, IntegerVector cont_cols, NumericVector cont_thresh, bool per_leaf_denom);
 RcppExport SEXP _infForest_honest_all(SEXP forestSEXP, SEXP X_numSEXP, SEXP y_honestSEXP, SEXP honest_idxSEXP, SEXP bin_colsSEXP, SEXP cont_colsSEXP, SEXP cont_threshSEXP, SEXP per_leaf_denomSEXP) {
@@ -189,6 +256,8 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_infForest_precompute_forest_cache_cpp", (DL_FUNC) &_infForest_precompute_forest_cache_cpp, 4},
+    {"_infForest_aipw_scores_cached_cpp", (DL_FUNC) &_infForest_aipw_scores_cached_cpp, 7},
     {"_infForest_honest_predict_cpp", (DL_FUNC) &_infForest_honest_predict_cpp, 5},
     {"_infForest_honest_predict_loo_cpp", (DL_FUNC) &_infForest_honest_predict_loo_cpp, 4},
     {"_infForest_aipw_scores_cpp", (DL_FUNC) &_infForest_aipw_scores_cpp, 11},
@@ -196,6 +265,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_infForest_aipw_curve_v2_cpp", (DL_FUNC) &_infForest_aipw_curve_v2_cpp, 8},
     {"_infForest_aipw_curve_cpp", (DL_FUNC) &_infForest_aipw_curve_cpp, 9},
     {"_infForest_augment_forest_with_splits", (DL_FUNC) &_infForest_augment_forest_with_splits, 7},
+    {"_infForest_debug_compare_scorers", (DL_FUNC) &_infForest_debug_compare_scorers, 10},
+    {"_infForest_debug_tree_walk", (DL_FUNC) &_infForest_debug_tree_walk, 6},
     {"_infForest_honest_all", (DL_FUNC) &_infForest_honest_all, 8},
     {"_infForest_honest_curve", (DL_FUNC) &_infForest_honest_curve, 8},
     {"_infForest_honest_interaction_2x2", (DL_FUNC) &_infForest_honest_interaction_2x2, 7},

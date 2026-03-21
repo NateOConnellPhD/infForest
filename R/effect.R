@@ -240,10 +240,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 
     if (is_bin) {
       if (do_sandwich) {
-        sand <- .compute_sandwich_se(object, var, at = at, type = type,
-                                     bw = bw, q_lo = q_lo, q_hi = q_hi,
-                                     subset = subset, ghat = ghat)
-        se_sand <- sand$se
+        se_sand <- est$sandwich_se
         out$se_sandwich <- se_sand
         out$ci_lower_sandwich <- est_scalar - z_crit * se_sand
         out$ci_upper_sandwich <- est_scalar + z_crit * se_sand
@@ -579,6 +576,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 .aipw_effect_binary <- function(object, var, subset = NULL,
                                 propensity_trees = 2000L,
                                 ghat = NULL) {
+  n <- nrow(object$X)
   psi_splits <- numeric(object$honesty.splits)
   diag_list <- vector("list", object$honesty.splits)
 
@@ -588,37 +586,71 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     ghat <- prop$ghat
   }
 
+  # Collect phi scores for sandwich SE in the same pass
+  phi_sum <- numeric(n)
+  phi_cnt <- integer(n)
+
+  has_cache <- !is.null(object$forest_caches)
+
   for (r in seq_along(object$forests)) {
     fs <- object$forests[[r]]
 
-    # Compute X_ord and col_idx once per forest pair
-    X_ord_A <- .get_X_ord(object, fs$rfA)
-    col_idx_A <- get_ranger_col_idx(fs$rfA, var)
-    X_ord_B <- .get_X_ord(object, fs$rfB)
-    col_idx_B <- get_ranger_col_idx(fs$rfB, var)
+    if (has_cache && is.null(subset)) {
+      col_idx_A <- get_ranger_col_idx(fs$rfA, var)
+      cache_AB <- object$forest_caches[[paste0(r, "_AB")]]
+      res_AB <- aipw_scores_cached_cpp(cache_AB, ghat, col_idx_A, TRUE, 1, 0)
+      col_idx_B <- get_ranger_col_idx(fs$rfB, var)
+      cache_BA <- object$forest_caches[[paste0(r, "_BA")]]
+      res_BA <- aipw_scores_cached_cpp(cache_BA, ghat, col_idx_B, TRUE, 1, 0)
+    } else {
+      X_ord_A <- .get_X_ord(object, fs$rfA)
+      col_idx_A <- get_ranger_col_idx(fs$rfA, var)
+      X_ord_B <- .get_X_ord(object, fs$rfB)
+      col_idx_B <- get_ranger_col_idx(fs$rfB, var)
 
-    res_AB <- .aipw_one_direction(
-      rf = fs$rfA, X_ord = X_ord_A, Y = object$Y,
-      honest_idx = fs$idxB, var = var, col_idx = col_idx_A,
-      a = 1, b = 0, is_binary = TRUE,
-      ghat = ghat, subset = subset
-    )
-
-    res_BA <- .aipw_one_direction(
-      rf = fs$rfB, X_ord = X_ord_B, Y = object$Y,
-      honest_idx = fs$idxA, var = var, col_idx = col_idx_B,
-      a = 1, b = 0, is_binary = TRUE,
-      ghat = ghat, subset = subset
-    )
+      res_AB <- .aipw_one_direction(
+        rf = fs$rfA, X_ord = X_ord_A, Y = object$Y,
+        honest_idx = fs$idxB, var = var, col_idx = col_idx_A,
+        a = 1, b = 0, is_binary = TRUE,
+        ghat = ghat, subset = subset
+      )
+      res_BA <- .aipw_one_direction(
+        rf = fs$rfB, X_ord = X_ord_B, Y = object$Y,
+        honest_idx = fs$idxA, var = var, col_idx = col_idx_B,
+        a = 1, b = 0, is_binary = TRUE,
+        ghat = ghat, subset = subset
+      )
+    }
 
     psi_splits[r] <- (res_AB$psi + res_BA$psi) / 2
     diag_list[[r]] <- list(AB = res_AB, BA = res_BA)
+
+    # Accumulate phi scores for sandwich
+    hon_B <- if (!is.null(subset)) intersect(fs$idxB, subset) else fs$idxB
+    hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
+    for (j in seq_along(hon_B)) {
+      k <- hon_B[j]
+      if (!is.na(res_AB$phi[j])) { phi_sum[k] <- phi_sum[k] + res_AB$phi[j]; phi_cnt[k] <- phi_cnt[k] + 1L }
+    }
+    for (j in seq_along(hon_A)) {
+      k <- hon_A[j]
+      if (!is.na(res_BA$phi[j])) { phi_sum[k] <- phi_sum[k] + res_BA$phi[j]; phi_cnt[k] <- phi_cnt[k] + 1L }
+    }
   }
+
+  # Compute sandwich SE from accumulated phi
+  valid <- phi_cnt > 0
+  n_valid <- sum(valid)
+  phi_avg <- rep(NA_real_, n)
+  phi_avg[valid] <- phi_sum[valid] / phi_cnt[valid]
+  psi_bar <- mean(phi_avg[valid])
+  V_IF <- sum((phi_avg[valid] - psi_bar)^2) / (n_valid * (n_valid - 1))
 
   list(
     psi = mean(psi_splits),
     per_split = psi_splits,
-    diagnostics = diag_list
+    diagnostics = diag_list,
+    sandwich_se = sqrt(V_IF)
   )
 }
 

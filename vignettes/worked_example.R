@@ -5,7 +5,7 @@
 library(infForest)
 
 # === DGM: 5 predictors + 1 categorical ===
-set.seed(1000)
+set.seed(42)
 n <- 400
 
 x1    <- rnorm(n)                               # nonlinear effect (sin)
@@ -38,9 +38,8 @@ cat(sprintf("  Cat - A:       %.3f\n", 0.35))
 cat(sprintf("  Cat - B:       %.3f\n", 0.50))
 cat(sprintf("  Cat - C:       %.3f\n", 0.15))
 cat(sprintf("  Cat prevalence: A=%.0f%%, B=%.0f%%, C=%.0f%%\n",
-            100*mean(race=="A"), 100*mean(race=="B"), 100*mean(race=="C")))
+            100*mean(cat=="A"), 100*mean(cat=="B"), 100*mean(cat=="C")))
 cat("\n")
-
 
 
 # ============================================================
@@ -49,6 +48,7 @@ cat("\n")
 fit <- infForest(y ~ ., data = dat_cont, num.trees = 5000,
                  penalize = TRUE, softmax = TRUE)
 print(fit)
+
 
 
 # ============================================================
@@ -104,7 +104,7 @@ cat("\n=== Point estimates only ===\n")
 
 effect(fit, "trt", ci = FALSE)
 effect(fit, "x2", ci = FALSE)
-effect(fit, "race", ci = FALSE)
+effect(fit, "cat", ci = FALSE)
 
 
 # ============================================================
@@ -126,6 +126,7 @@ cat("\n=== Effect curve for x1 ===\n")
 # Quick curve (no CI)
 ec <- effect_curve(fit, "x1", bw = 20, q_lo = 0.02, q_hi = 0.98)
 plot(ec, ylim = c(-1.2, 1.2))
+#add reference truth for comparison
 x1_ref <- ec$ref
 curve(0.8 * sin(1.5 * x) - 0.8 * sin(1.5 * x1_ref),
       add = TRUE, col = "red", lty = 2, lwd = 2)
@@ -177,10 +178,10 @@ int(fit, "x2", by = "trt", variance = "pasr", verbose = TRUE)
 # ============================================================
 cat("\n=== Summary ===\n")
 
-summary(fit, ~ trt + x2[.5, .8] + x4[.1,.9] + noise + race)
+summary(fit, ~ trt + x2[.5, .8] + x4[.1,.9] + noise + cat)
 
-# Specific race contrast in summary
-summary(fit, ~ trt + race["white", "black"])
+# Specific cat contrast in summary
+summary(fit, ~ trt + cat["A", "B"])
 
 
 # ============================================================

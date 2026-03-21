@@ -45,7 +45,7 @@ infForest uses [ranger](https://github.com/imbs-hl/ranger) as its forest engine.
 
 **`penalize.split.competition`** — At each node, CART selects the variable with the largest impurity reduction. But continuous variables evaluate many more candidate split points than binary variables, giving them a structural advantage: the maximum of *M* noisy candidates is systematically larger than the maximum of 1, even under the null. This is the search advantage (a winner's curse proportional to $\sqrt{2 \log M}$). The standardized criterion subtracts the expected search advantage from each variable's best split score, producing a level comparison across variable types. The correction is closed-form and adds negligible computation.
 
-**`softmax.split`** — Standard CART selects the single best variable at each node (argmax). Softmax replaces this with probabilistic selection: variables are chosen with probability proportional to $\exp(\tau \cdot \tilde{G}_j)$, where $\tilde{G}_j$ is the penalized criterion. This increases the inclusion rate for variables with moderate but real signal that would otherwise be crowded out by stronger predictors at every node. The temperature $\tau$ is set automatically. Requires `penalize.split.competition = TRUE`.
+**`softmax.split`** — Standard CART selects the single best variable at each node (argmax). Softmax replaces this with probabilistic selection: variables are chosen with probability proportional to $\exp(\tau \cdot \tilde{G}_j)$, where $\tilde{G}_j$ is the penalized criterion. This increases the inclusion rate for variables with moderate but real signal that would otherwise be crowded out by stronger predictors at every node. $\tau$ is set automatically. Requires `penalize.split.competition = TRUE`.
 
 Both modifications operate only at the moment of variable selection within each node. Everything downstream — split point selection, daughter node assignment, leaf predictions, OOB estimation, prediction — is identical to standard ranger.
 
@@ -139,7 +139,7 @@ Fitting takes a few seconds for n = 400 with 3000 trees. For larger datasets (n 
 
 **What the estimate means:**
 
-- **Binary predictors:** The estimate is the average difference in the conditional mean when the predictor is 1 vs 0, adjusting for all other covariates: $E[f(X^{(j=1)}) - f(X^{(j=0)})]$. Under exchangeability, this is the average causal effect.
+- **Binary predictors:** The estimate is the average difference in the conditional mean when the predictor is 1 vs 0, adjusting for all other covariates: $E[f(X^{(j=1)}) - f(X^{(j=0)})]$. Under exchangeability, this is the average contrasted effect.
 - **Continuous predictors:** The estimate is the average per-unit slope of the effect curve between two comparison points. For example, "Q25 to Q75: 0.50" means that on average, a one-unit increase in the predictor between the 25th and 75th percentile is associated with a 0.50 increase in the outcome. This is computed from the integrated AIPW effect curve, so it captures nonlinearity — the slope between different comparison points can differ.
 
 ```r

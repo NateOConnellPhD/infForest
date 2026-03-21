@@ -3,6 +3,7 @@
 .Rhistory
 .RData
 .Rdata
+src/debug_compare.cpp
 src/*.o
 src/*.so
 src/*.dll

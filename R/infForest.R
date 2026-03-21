@@ -175,14 +175,39 @@ infForest <- function(formula,
   }
 
   # --- Cache ranger-ordered X matrix ---
-  # All forests use the same X columns (from the same data frame),
-  # so the ranger column ordering is identical across rfA/rfB/splits.
-  # Compute once here; .get_X_ord() in effect.R uses this cache.
   X_ord <- reorder_X_to_ranger(X, forests[[1]]$rfA)
+  # Fix factor encoding for X_ord (ranger uses integer codes)
+  X_df_clean <- X
+  for (col in names(X_df_clean)) {
+    if (is.factor(X_df_clean[[col]]) || is.character(X_df_clean[[col]])) {
+      X_df_clean[[col]] <- as.numeric(as.factor(X_df_clean[[col]]))
+    }
+  }
+  vnames <- forests[[1]]$rfA$forest$independent.variable.names
+  X_ord <- as.matrix(X_df_clean[, vnames])
+
+  # --- Precompute forest caches for fast scoring ---
+  # One cache per (honesty_split, direction). Eliminates tree extraction,
+  # obs_leaf routing, and leaf mean computation from every effect() call.
+  forest_caches <- list()
+  for (r in seq_along(forests)) {
+    fs <- forests[[r]]
+    # AB direction: forest A builds, fold B is honest
+    y_hon_AB <- rep(NA_real_, n)
+    y_hon_AB[fs$idxB] <- as.numeric(Y[fs$idxB])
+    forest_caches[[paste0(r, "_AB")]] <- precompute_forest_cache_cpp(
+      fs$rfA$forest, X_ord, y_hon_AB, as.integer(fs$idxB))
+    # BA direction: forest B builds, fold A is honest
+    y_hon_BA <- rep(NA_real_, n)
+    y_hon_BA[fs$idxA] <- as.numeric(Y[fs$idxA])
+    forest_caches[[paste0(r, "_BA")]] <- precompute_forest_cache_cpp(
+      fs$rfB$forest, X_ord, y_hon_BA, as.integer(fs$idxA))
+  }
 
   # --- Build return object ---
   out <- list(
     forests = forests,
+    forest_caches = forest_caches,
     X = X,
     X_num = X_num,
     X_ord = X_ord,
