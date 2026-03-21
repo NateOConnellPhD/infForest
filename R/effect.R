@@ -75,8 +75,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 
   if (var_type == "binary") {
     est <- .aipw_effect_binary(object, var, subset = subset,
-                               propensity_trees = propensity_trees,
-                               ghat = ghat)
+                                propensity_trees = propensity_trees,
+                                ghat = ghat)
     out <- list(
       variable = var,
       var_type = var_type,
@@ -108,10 +108,10 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     grid_hi <- max(at_vals, unname(quantile(x_var, q_hi)))
 
     curve_result <- .aipw_build_curve(object, var, grid_lo, grid_hi,
-                                      n_honest = n_honest, bw = bw,
-                                      subset = subset,
-                                      propensity_trees = propensity_trees,
-                                      ghat = ghat)
+                                       n_honest = n_honest, bw = bw,
+                                       subset = subset,
+                                       propensity_trees = propensity_trees,
+                                       ghat = ghat)
 
     n_at <- length(at_vals)
 
@@ -176,7 +176,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
       bad <- setdiff(at_levels, all_levels)
       if (length(bad) > 0)
         stop(paste0("Levels not found in '", var, "': ", paste(bad, collapse = ", "),
-                    ". Available: ", paste(all_levels, collapse = ", ")))
+                     ". Available: ", paste(all_levels, collapse = ", ")))
       if (length(at_levels) == 2) {
         pairs_list <- list(c(at_levels[1], at_levels[2]))
       } else {
@@ -203,8 +203,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
       lev_to   <- pairs_list[[k]][2]
 
       est_k <- .categorical_pairwise_effect(object, var, lev_to, lev_from,
-                                            all_levels, subset = subset,
-                                            compute_se = ci)
+                                             all_levels, subset = subset,
+                                             compute_se = ci)
       contrasts_df$contrast[k]   <- paste0(lev_to, " - ", lev_from)
       contrasts_df$from_level[k] <- lev_from
       contrasts_df$to_level[k]   <- lev_to
@@ -292,8 +292,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
         for (k in seq_len(n_contr)) {
           pair_at <- c(out$contrasts$from_val[k], out$contrasts$to_val[k])
           sand_k <- .compute_sandwich_se(object, var, at = pair_at, type = "value",
-                                         bw = bw, q_lo = q_lo, q_hi = q_hi,
-                                         subset = subset, ghat = ghat)
+                                          bw = bw, q_lo = q_lo, q_hi = q_hi,
+                                          subset = subset, ghat = ghat)
           out$contrasts$se_sandwich[k] <- sand_k$se
           out$contrasts$ci_lower_sandwich[k] <- out$contrasts$estimate[k] - z_crit * sand_k$se
           out$contrasts$ci_upper_sandwich[k] <- out$contrasts$estimate[k] + z_crit * sand_k$se
@@ -357,8 +357,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 #' optionally the sandwich SE (computed from the same phi scores).
 #' @keywords internal
 .categorical_pairwise_effect <- function(object, var, lev_to, lev_from,
-                                         all_levels, subset = NULL,
-                                         compute_se = FALSE) {
+                                          all_levels, subset = NULL,
+                                          compute_se = FALSE) {
   x_var_cat <- object$X[[var]]
   n <- nrow(object$X)
 
@@ -410,16 +410,16 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     y_hon_AB <- rep(NA_real_, n)
     y_hon_AB[hon_B] <- as.numeric(object$Y[hon_B])
     res_AB <- aipw_scores_v2_cpp(fs$rfA$forest, X_ord_A, y_hon_AB,
-                                 as.integer(hon_B), ghat,
-                                 col_idx_A, TRUE, code_to, code_from,
-                                 indicator_ = x_binary)
+                                  as.integer(hon_B), ghat,
+                                  col_idx_A, TRUE, code_to, code_from,
+                                  indicator_ = x_binary)
 
     y_hon_BA <- rep(NA_real_, n)
     y_hon_BA[hon_A] <- as.numeric(object$Y[hon_A])
     res_BA <- aipw_scores_v2_cpp(fs$rfB$forest, X_ord_B, y_hon_BA,
-                                 as.integer(hon_A), ghat,
-                                 col_idx_B, TRUE, code_to, code_from,
-                                 indicator_ = x_binary)
+                                  as.integer(hon_A), ghat,
+                                  col_idx_B, TRUE, code_to, code_from,
+                                  indicator_ = x_binary)
 
     psi_splits[r] <- (res_AB$psi + res_BA$psi) / 2
 
@@ -505,26 +505,32 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   if (is_binary) {
     # Binary: K-fold logistic ridge, predictions are out-of-fold
     K <- 10L
+    # Deterministic fold assignments for reproducibility
+    fold_seed <- sum(as.integer(charToRaw(var))) * 31L + n * 17L
+    set.seed(fold_seed)
     cv_fit <- glmnet::cv.glmnet(Xm, x_j, alpha = 0,
-                                family = "binomial", nfolds = 5)
+                                 family = "binomial", nfolds = 5)
     lambda_use <- cv_fit$lambda.min
 
+    set.seed(fold_seed + 1L)
     folds <- sample(rep(seq_len(K), length.out = n))
     ghat <- numeric(n)
     for (fold in seq_len(K)) {
       train <- which(folds != fold)
       test  <- which(folds == fold)
       fit_k <- glmnet::glmnet(Xm[train, , drop = FALSE], x_j[train],
-                              alpha = 0, family = "binomial",
-                              lambda = lambda_use)
+                               alpha = 0, family = "binomial",
+                               lambda = lambda_use)
       ghat[test] <- as.numeric(predict(fit_k, Xm[test, , drop = FALSE],
-                                       type = "response"))
+                                        type = "response"))
     }
     ghat <- pmax(pmin(ghat, 0.975), 0.025)
 
   } else {
     # Continuous: ridge LOO via PRESS formula
     # ghat_LOO(k) = x_j(k) - e_insample(k) / (1 - h_kk)
+    fold_seed <- sum(as.integer(charToRaw(var))) * 31L + n * 17L
+    set.seed(fold_seed)
     cv_fit <- glmnet::cv.glmnet(Xm, x_j, alpha = 0, nfolds = 5)
     lambda_use <- cv_fit$lambda.min
 
@@ -548,7 +554,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 #' fused augmentation for binary.
 #' @keywords internal
 .aipw_one_direction <- function(rf, X_ord, Y, honest_idx, var, col_idx, a, b,
-                                is_binary, ghat, subset = NULL) {
+                                 is_binary, ghat, subset = NULL) {
   n <- nrow(X_ord)
 
   y_hon <- rep(NA_real_, n)
@@ -574,15 +580,15 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 #' Full AIPW binary effect with cross-fitting and repeated honest splits
 #' @keywords internal
 .aipw_effect_binary <- function(object, var, subset = NULL,
-                                propensity_trees = 2000L,
-                                ghat = NULL) {
+                                 propensity_trees = 2000L,
+                                 ghat = NULL) {
   n <- nrow(object$X)
   psi_splits <- numeric(object$honesty.splits)
   diag_list <- vector("list", object$honesty.splits)
 
   if (is.null(ghat)) {
     prop <- .fit_propensity(object$X, var, is_binary = TRUE,
-                            n_trees = propensity_trees)
+                             n_trees = propensity_trees)
     ghat <- prop$ghat
   }
 
@@ -658,38 +664,51 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 #' Build AIPW effect curve for continuous predictors (no augmentation)
 #' @keywords internal
 .aipw_build_curve <- function(object, var, grid_lo, grid_hi, n_honest, bw,
-                              subset = NULL, propensity_trees = 2000L,
-                              ghat = NULL) {
+                               subset = NULL, propensity_trees = 2000L,
+                               ghat = NULL) {
   n_intervals <- max(1L, as.integer(n_honest / bw))
   grid <- seq(grid_lo, grid_hi, length.out = n_intervals + 1)
 
   if (is.null(ghat)) {
     prop <- .fit_propensity(object$X, var, is_binary = FALSE,
-                            n_trees = propensity_trees)
+                             n_trees = propensity_trees)
     ghat <- prop$ghat
   }
 
   all_slopes <- matrix(0, nrow = object$honesty.splits, ncol = n_intervals)
+  has_cache <- !is.null(object$forest_caches)
 
   for (r in seq_along(object$forests)) {
     fs <- object$forests[[r]]
 
-    X_ord_A <- .get_X_ord(object, fs$rfA)
-    col_idx_A <- get_ranger_col_idx(fs$rfA, var)
-    X_ord_B <- .get_X_ord(object, fs$rfB)
-    col_idx_B <- get_ranger_col_idx(fs$rfB, var)
+    if (has_cache && is.null(subset)) {
+      col_idx <- get_ranger_col_idx(fs$rfA, var)
 
-    slopes_AB <- .aipw_curve_one_direction(
-      rf = fs$rfA, X_ord = X_ord_A, Y = object$Y,
-      honest_idx = fs$idxB, col_idx = col_idx_A,
-      grid = grid, ghat = ghat, subset = subset
-    )
+      cache_AB <- object$forest_caches[[paste0(r, "_AB")]]
+      res_AB <- aipw_curve_cached_cpp(cache_AB, ghat, col_idx, grid)
+      slopes_AB <- as.numeric(res_AB$slopes)
 
-    slopes_BA <- .aipw_curve_one_direction(
-      rf = fs$rfB, X_ord = X_ord_B, Y = object$Y,
-      honest_idx = fs$idxA, col_idx = col_idx_B,
-      grid = grid, ghat = ghat, subset = subset
-    )
+      cache_BA <- object$forest_caches[[paste0(r, "_BA")]]
+      res_BA <- aipw_curve_cached_cpp(cache_BA, ghat, col_idx, grid)
+      slopes_BA <- as.numeric(res_BA$slopes)
+    } else {
+      X_ord_A <- .get_X_ord(object, fs$rfA)
+      col_idx_A <- get_ranger_col_idx(fs$rfA, var)
+      X_ord_B <- .get_X_ord(object, fs$rfB)
+      col_idx_B <- get_ranger_col_idx(fs$rfB, var)
+
+      slopes_AB <- .aipw_curve_one_direction(
+        rf = fs$rfA, X_ord = X_ord_A, Y = object$Y,
+        honest_idx = fs$idxB, col_idx = col_idx_A,
+        grid = grid, ghat = ghat, subset = subset
+      )
+
+      slopes_BA <- .aipw_curve_one_direction(
+        rf = fs$rfB, X_ord = X_ord_B, Y = object$Y,
+        honest_idx = fs$idxA, col_idx = col_idx_B,
+        grid = grid, ghat = ghat, subset = subset
+      )
+    }
 
     all_slopes[r, ] <- (slopes_AB + slopes_BA) / 2
   }
@@ -705,7 +724,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 #' AIPW curve slopes via aipw_curve_v2_cpp — grid vector, no matrix copies
 #' @keywords internal
 .aipw_curve_one_direction <- function(rf, X_ord, Y, honest_idx, col_idx, grid,
-                                      ghat, subset = NULL) {
+                                       ghat, subset = NULL) {
   n <- nrow(X_ord)
   G <- length(grid) - 1
 
@@ -743,7 +762,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 .honest_build_curve <- function(object, var, grid_lo, grid_hi, n_honest, bw,
                                 subset = NULL) {
   .aipw_build_curve(object, var, grid_lo, grid_hi, n_honest, bw,
-                    subset = subset)
+                     subset = subset)
 }
 
 #' @keywords internal
@@ -758,7 +777,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 
 #' @keywords internal
 .extract_binary_one_direction <- function(rf, X, Y, honest_idx, var,
-                                          ghat = NULL, object = NULL) {
+                                           ghat = NULL, object = NULL) {
   X_df <- if (is.data.frame(X)) X else as.data.frame(X)
   if (is.null(ghat)) {
     prop <- .fit_propensity(X_df, var, is_binary = TRUE)
@@ -781,7 +800,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 
 #' @keywords internal
 .extract_curve_slopes <- function(rf, X, Y, honest_idx, var, grid,
-                                  ghat = NULL, object = NULL) {
+                                   ghat = NULL, object = NULL) {
   X_df <- if (is.data.frame(X)) X else as.data.frame(X)
   if (is.null(ghat)) {
     prop <- .fit_propensity(X_df, var, is_binary = FALSE)
@@ -852,3 +871,4 @@ print.infForest_effect <- function(x, ...) {
   }
   invisible(x)
 }
+

@@ -9,6 +9,14 @@ aipw_scores_cached_cpp <- function(cache, ghat, var_col, is_binary, a, b, indica
     .Call(`_infForest_aipw_scores_cached_cpp`, cache, ghat, var_col, is_binary, a, b, indicator_)
 }
 
+aipw_scores_multi_cpp <- function(cache, var_cols, is_binary_vec, a_vals, b_vals, ghat_list, indicator_list_ = NULL) {
+    .Call(`_infForest_aipw_scores_multi_cpp`, cache, var_cols, is_binary_vec, a_vals, b_vals, ghat_list, indicator_list_)
+}
+
+aipw_curve_cached_cpp <- function(cache, ghat, var_col, grid_points, sigma2_override = -1.0) {
+    .Call(`_infForest_aipw_curve_cached_cpp`, cache, ghat, var_col, grid_points, sigma2_override)
+}
+
 honest_predict_cpp <- function(forest, X_query, X_honest, y_honest, honest_idx) {
     .Call(`_infForest_honest_predict_cpp`, forest, X_query, X_honest, y_honest, honest_idx)
 }
@@ -31,10 +39,6 @@ aipw_curve_v2_cpp <- function(forest, X_obs, y_honest, honest_idx, ghat, var_col
 
 aipw_curve_cpp <- function(forest, X_obs, X_grid_list, y_honest, honest_idx, ghat, var_col, grid_points, sigma2_override = -1.0) {
     .Call(`_infForest_aipw_curve_cpp`, forest, X_obs, X_grid_list, y_honest, honest_idx, ghat, var_col, grid_points, sigma2_override)
-}
-
-augment_forest_with_splits <- function(forest, X_obs, honest_idx, var_col, cutpoint, query_a, query_b) {
-    .Call(`_infForest_augment_forest_with_splits`, forest, X_obs, honest_idx, var_col, cutpoint, query_a, query_b)
 }
 
 debug_compare_scorers <- function(cache, forest, X_obs, y_honest, honest_idx, ghat, var_col, val_a, val_b, check_tree) {

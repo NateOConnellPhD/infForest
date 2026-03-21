@@ -84,45 +84,162 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
 
   results <- list()
 
-  # Separate main effects into binary (batchable) and continuous (individual)
-  binary_main_vars <- character(0)
-  cont_specs <- list()
+  # Separate main effects and interactions
+  main_specs <- list()
   interaction_specs <- list()
 
   for (spec in specs) {
     if (spec$kind == "main") {
-      v <- spec$var
-      check_varname(object, v)
-      var_type <- detect_var_type(object$X[[v]])
-      if (var_type == "binary") {
-        binary_main_vars <- c(binary_main_vars, v)
-      } else {
-        cont_specs <- c(cont_specs, list(spec))
-      }
+      check_varname(object, spec$var)
+      main_specs <- c(main_specs, list(spec))
     } else if (spec$kind == "interaction") {
       interaction_specs <- c(interaction_specs, list(spec))
     }
   }
 
-  # Batch all binary main effects
-  if (length(binary_main_vars) > 0) {
-    for (v in binary_main_vars) {
-      results[[v]] <- effect(object, v, variance = variance, ci = ci,
-                             alpha = alpha, bw = bw)
+  # ============================================================
+  # Batch main effects via multi-variable scorer
+  # ============================================================
+  has_cache <- !is.null(object$forest_caches)
+
+  if (length(main_specs) > 0 && has_cache && ci) {
+
+    n_obs <- nrow(object$X)
+    z_crit <- qnorm(1 - alpha / 2)
+
+    # Build scorer inputs for binary main-effect variables
+    var_names <- character(0)
+    var_cols <- integer(0)
+    is_bin_vec <- logical(0)
+    a_vec <- numeric(0)
+    b_vec <- numeric(0)
+    ghat_list <- list()
+
+    for (spec in main_specs) {
+      v <- spec$var
+      var_type <- detect_var_type(object$X[[v]])
+      is_bin <- (var_type == "binary")
+      is_cat <- (var_type == "categorical")
+
+      if (is_cat) {
+        # Categorical: handled separately (subset approach)
+        results[[v]] <- effect(object, v, at = spec$at,
+                               variance = variance, ci = ci, alpha = alpha)
+        next
+      }
+
+      if (!is_bin) {
+        # Continuous: use effect() with curve builder (correct estimand)
+        v_type <- .get_type(v)
+        at_raw <- if (!is.null(spec$at)) spec$at else c(0.25, 0.75)
+        results[[v]] <- effect(object, v, at = at_raw, type = v_type,
+                               bw = bw, q_lo = q_lo, q_hi = q_hi,
+                               variance = variance, ci = ci, alpha = alpha)
+        next
+      }
+
+      # Binary: batch into multi-scorer
+      var_names <- c(var_names, v)
+      col_idx <- get_ranger_col_idx(object$forests[[1]]$rfA, v)
+      var_cols <- c(var_cols, col_idx)
+      is_bin_vec <- c(is_bin_vec, TRUE)
+      a_vec <- c(a_vec, 1)
+      b_vec <- c(b_vec, 0)
+
+      prop <- .fit_propensity(object$X, v, is_binary = TRUE)
+      ghat_list <- c(ghat_list, list(prop$ghat))
+    }
+
+    n_batch <- length(var_names)
+    if (n_batch > 0) {
+      # Accumulate phi scores across honesty splits
+      phi_sums <- vector("list", n_batch)
+      phi_cnts <- vector("list", n_batch)
+      psi_splits <- matrix(0, nrow = object$honesty.splits, ncol = n_batch)
+      for (v in seq_len(n_batch)) {
+        phi_sums[[v]] <- numeric(n_obs)
+        phi_cnts[[v]] <- integer(n_obs)
+      }
+
+      for (r in seq_along(object$forests)) {
+        fs <- object$forests[[r]]
+
+        cache_AB <- object$forest_caches[[paste0(r, "_AB")]]
+        res_AB <- aipw_scores_multi_cpp(cache_AB, as.integer(var_cols),
+                                        is_bin_vec, a_vec, b_vec, ghat_list)
+
+        cache_BA <- object$forest_caches[[paste0(r, "_BA")]]
+        res_BA <- aipw_scores_multi_cpp(cache_BA, as.integer(var_cols),
+                                        is_bin_vec, a_vec, b_vec, ghat_list)
+
+        hon_B <- fs$idxB
+        hon_A <- fs$idxA
+
+        for (v in seq_len(n_batch)) {
+          psi_splits[r, v] <- (res_AB[[v]]$psi + res_BA[[v]]$psi) / 2
+
+          # Accumulate phi for sandwich
+          for (j in seq_along(hon_B)) {
+            k <- hon_B[j]
+            if (!is.na(res_AB[[v]]$phi[j])) {
+              phi_sums[[v]][k] <- phi_sums[[v]][k] + res_AB[[v]]$phi[j]
+              phi_cnts[[v]][k] <- phi_cnts[[v]][k] + 1L
+            }
+          }
+          for (j in seq_along(hon_A)) {
+            k <- hon_A[j]
+            if (!is.na(res_BA[[v]]$phi[j])) {
+              phi_sums[[v]][k] <- phi_sums[[v]][k] + res_BA[[v]]$phi[j]
+              phi_cnts[[v]][k] <- phi_cnts[[v]][k] + 1L
+            }
+          }
+        }
+      }
+
+      # Build effect results for each binary variable
+      for (v in seq_len(n_batch)) {
+        vname <- var_names[v]
+        est <- mean(psi_splits[, v])
+
+        # Sandwich SE from phi scores
+        valid <- phi_cnts[[v]] > 0
+        n_valid <- sum(valid)
+        phi_avg <- rep(NA_real_, n_obs)
+        phi_avg[valid] <- phi_sums[[v]][valid] / phi_cnts[[v]][valid]
+        psi_bar <- mean(phi_avg[valid])
+        V_IF <- sum((phi_avg[valid] - psi_bar)^2) / (n_valid * (n_valid - 1))
+        se_sand <- sqrt(V_IF)
+
+        out_v <- list(
+          variable = vname, var_type = "binary",
+          estimate = est, n_intervals = 1L, subset = NULL,
+          se_sandwich = se_sand,
+          ci_lower_sandwich = est - z_crit * se_sand,
+          ci_upper_sandwich = est + z_crit * se_sand,
+          se = se_sand,
+          ci_lower = est - z_crit * se_sand,
+          ci_upper = est + z_crit * se_sand
+        )
+        class(out_v) <- "infForest_effect"
+        results[[vname]] <- out_v
+      }
+    }
+
+  } else {
+    # Fallback: no cache or no CI — use individual effect() calls
+    for (spec in main_specs) {
+      v <- spec$var
+      v_type <- .get_type(v)
+      at <- if (!is.null(spec$at)) spec$at else c(0.25, 0.75)
+      results[[v]] <- effect(object, v, at = at, type = v_type,
+                             bw = bw, q_lo = q_lo, q_hi = q_hi,
+                             variance = variance, ci = ci, alpha = alpha)
     }
   }
 
-  # Continuous main effects (each needs its own grid)
-  for (spec in cont_specs) {
-    v <- spec$var
-    v_type <- .get_type(v)
-    at <- if (!is.null(spec$at)) spec$at else c(0.25, 0.75)
-    results[[v]] <- effect(object, v, at = at, type = v_type,
-                           bw = bw, q_lo = q_lo, q_hi = q_hi,
-                           variance = variance, ci = ci, alpha = alpha)
-  }
-
-  # Interactions
+  # ============================================================
+  # Interactions — still use individual int() calls
+  # ============================================================
   for (spec in interaction_specs) {
     focal <- spec$focal
     by_var <- spec$by
@@ -398,9 +515,9 @@ print.infForest_summary <- function(x, ...) {
                         eff$differences$difference[k])
         if ("se" %in% names(eff$differences) && !is.na(eff$differences$se[k]))
           line <- paste0(line, sprintf("  (SE: %.4f, 95%% CI: [%.4f, %.4f])",
-                                        eff$differences$se[k],
-                                        eff$differences$ci_lower[k],
-                                        eff$differences$ci_upper[k]))
+                                       eff$differences$se[k],
+                                       eff$differences$ci_lower[k],
+                                       eff$differences$ci_upper[k]))
         cat(line, "\n")
       }
 
@@ -409,7 +526,7 @@ print.infForest_summary <- function(x, ...) {
         line <- sprintf("  %-15s  binary      %8.4f", nm, eff$estimate)
         if (!is.null(eff$se))
           line <- paste0(line, sprintf("  (SE: %.4f, 95%% CI: [%.4f, %.4f])",
-                                        eff$se, eff$ci_lower, eff$ci_upper))
+                                       eff$se, eff$ci_lower, eff$ci_upper))
         cat(line, "\n")
       } else {
         df <- eff$contrasts
@@ -418,7 +535,7 @@ print.infForest_summary <- function(x, ...) {
           line <- sprintf("  %s  %-16s  %8.4f  (per unit)", label, df$contrast[k], df$estimate[k])
           if ("se" %in% names(df) && !is.na(df$se[k]))
             line <- paste0(line, sprintf("  (SE: %.4f, 95%% CI: [%.4f, %.4f])",
-                                          df$se[k], df$ci_lower[k], df$ci_upper[k]))
+                                         df$se[k], df$ci_lower[k], df$ci_upper[k]))
           cat(line, "\n")
         }
       }
