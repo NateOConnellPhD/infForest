@@ -22,7 +22,7 @@ When both agree, the parametric assumptions are consistent with the data. When t
 
 The finite-sample conservative bias (attenuation toward zero) arises from the forest's nonparametric smoothing. Two factors control its magnitude:
 
-- **Sample size.** More data → smaller leaves → less smoothing → less attenuation.
+- **Sample size.** More data → fewer leaves across a forest → less smoothing → less attenuation.
 - **Model complexity.** More predictors spread the forest's splitting budget, increasing effective smoothing per variable. Reducing irrelevant predictors concentrates the forest on important dimensions and reduces attenuation.
 
 Variable selection is an active area of development for this framework. Guidance on principled variable selection for inference forests is forthcoming. For now, reducing the predictor set to relevant variables will improve finite-sample performance.
@@ -42,7 +42,7 @@ infForest uses [ranger](https://github.com/imbs-hl/ranger) as its forest engine.
 
 **`penalize.split.competition`** — At each node, CART selects the variable with the largest impurity reduction. But continuous variables evaluate many more candidate split points than binary variables, giving them a structural advantage. The standardized criterion subtracts the expected search advantage from each variable's best split score, producing a level comparison across variable types. The correction is closed-form and adds negligible computation.
 
-**`softmax.split`** — Standard CART selects the single best variable at each node (argmax). Softmax replaces this with probabilistic selection: variables are chosen with probability proportional to their penalized criterion scores. This increases the inclusion rate for variables with moderate but real signal. Requires `penalize.split.competition = TRUE`.
+**`softmax.split`** — Standard CART selects the single best variable at each node (argmax). Softmax replaces this with probabilistic selection: variables are chosen with probability proportional to their penalized criterion scores. This increases the inclusion rate for variables with moderate but real signal. 
 
 Both modifications operate only at the moment of variable selection within each node. Everything downstream — split point selection, daughter node assignment, leaf predictions, prediction — is identical to standard ranger.
 
