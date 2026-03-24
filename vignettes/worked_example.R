@@ -11,12 +11,6 @@
 #   Part 6 — The $df interface for programmatic access
 #   Part 7 — Binary outcomes
 #
-# Before running, rebuild the package:
-#   Rcpp::compileAttributes()
-#   roxygen2::roxygenize()
-#   devtools::load_all()
-#
-#
 # --- Parallelism ---
 #
 # infForest has two independent parallelism layers:
