@@ -11,6 +11,12 @@
 #   Part 6 — The $df interface for programmatic access
 #   Part 7 — Binary outcomes
 #
+# Before running, rebuild the package:
+#   Rcpp::compileAttributes()
+#   roxygen2::roxygenize()
+#   devtools::load_all()
+#
+#
 # --- Parallelism ---
 #
 # infForest has two independent parallelism layers:
@@ -145,26 +151,30 @@ x1 <- rnorm(n); x2 <- rnorm(n); x3 <- rnorm(n)
 x4 <- rnorm(n); x5 <- rbinom(n, 1, 0.4); x6 <- rnorm(n)
 x7 <- rnorm(n); noise <- rnorm(n)
 p_true <- plogis(1.5*x1 + 0.8*x2 + 0.6*sin(x3) + 0.5*x4 + 0.7*x5 + 0.4*x6 +
-                  0.3*x1*x5 + 0.25*x2*x4)
+                   0.3*x1*x5 + 0.25*x2*x4)
 y_bin <- factor(rbinom(n, 1, p_true))
 dat_bin <- data.frame(x1, x2, x3, x4, x5, x6, x7, noise, y = y_bin)
 rf_bin <- ranger(y ~ ., data = dat_bin, num.trees = 5000, probability = TRUE)
 
 set.seed(100)
 n_new <- 300
-dat_bin_new <- data.frame(x1=rnorm(n_new), x2=rnorm(n_new), x3=rnorm(n_new),
-                          x4=rnorm(n_new), x5=rbinom(n_new,1,0.4), x6=rnorm(n_new),
-                          x7=rnorm(n_new), noise=rnorm(n_new))
+x1n <- rnorm(n_new); x2n <- rnorm(n_new); x3n <- rnorm(n_new)
+x4n <- rnorm(n_new); x5n <- rbinom(n_new, 1, 0.4); x6n <- rnorm(n_new)
+x7n <- rnorm(n_new); noisen <- rnorm(n_new)
+p_true_new <- plogis(1.5*x1n + 0.8*x2n + 0.6*sin(x3n) + 0.5*x4n + 0.7*x5n + 0.4*x6n +
+                       0.3*x1n*x5n + 0.25*x2n*x4n)
+dat_bin_new <- data.frame(x1=x1n, x2=x2n, x3=x3n, x4=x4n, x5=x5n, x6=x6n,
+                          x7=x7n, noise=noisen)
 ps_bin <- pasr_predict(rf_bin, data = dat_bin, R = 80, verbose = TRUE)
 pi_bin <- predict(ps_bin, newdata = dat_bin_new)
 head(pi_bin[, c("f_hat", "se", "ci_lower", "ci_upper")])
 
 png("man/figures/probability_cis_binary.png", width = 700, height = 500)
-ord <- order(pi_bin$f_hat)
-plot(seq_len(n_new), pi_bin$f_hat[ord], pch = 16, cex = 0.5, col = "gray40",
-     xlab = "Observation (sorted by P(Y=1))", ylab = "P(Y=1)",
-     main = "Probability CIs (binary)", ylim = c(0, 1))
-segments(seq_len(n_new), pi_bin$ci_lower[ord], seq_len(n_new), pi_bin$ci_upper[ord],
+plot(pi_bin$f_hat, p_true_new, pch = 16, cex = 0.5, col = "gray40",
+     xlab = "Forest prediction P(Y=1)", ylab = "True P(Y=1)",
+     main = "Probability CIs (binary)", ylim = c(0, 1), xlim = c(0, 1))
+abline(0, 1, col = "red")
+segments(pi_bin$f_hat, pi_bin$ci_lower, pi_bin$f_hat, pi_bin$ci_upper,
          col = rgb(0, 0, 1, 0.15))
 dev.off()
 
@@ -204,7 +214,7 @@ x1 <- rnorm(n); x2 <- rnorm(n); trt <- rbinom(n, 1, 0.4)
 x4 <- 0.5 * x2 + rnorm(n) * sqrt(0.75); noise <- rnorm(n)
 group <- factor(sample(c("A","B","C"), n, TRUE, c(0.5,0.3,0.2)))
 mu <- 0.8*sin(1.5*x1) + 0.4*x2 + 0.3*trt + 0.2*x2*trt +
-      ifelse(group=="A", -0.10, ifelse(group=="B", 0.25, 0.40))
+  ifelse(group=="A", -0.10, ifelse(group=="B", 0.25, 0.40))
 y_cont <- mu + (0.5 + 0.2*abs(x1)) * rnorm(n)
 y_bin  <- factor(rbinom(n, 1, plogis(mu)), levels = c(0, 1))
 dat_cont <- data.frame(x1, x2, trt, x4, noise, group, y = y_cont)

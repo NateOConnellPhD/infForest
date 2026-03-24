@@ -22,7 +22,7 @@ When both agree, the parametric assumptions are consistent with the data. When t
 
 The finite-sample conservative bias (attenuation toward zero) arises from the forest's nonparametric smoothing. Two factors control its magnitude:
 
-- **Sample size.** More data → fewer leaves across a forest → less smoothing → less attenuation.
+- **Sample size.** More data → more leaves across a forest → less smoothing → less attenuation.
 - **Model complexity.** More predictors spread the forest's splitting budget, increasing effective smoothing per variable. Reducing irrelevant predictors concentrates the forest on important dimensions and reduces attenuation.
 
 Variable selection is an active area of development for this framework. Guidance on principled variable selection for inference forests is forthcoming. For now, reducing the predictor set to relevant variables will improve finite-sample performance.
