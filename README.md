@@ -284,12 +284,19 @@ forest_means(fit, trt = c(0, 1), x2 = 0)              # joint marginalization
 # Pointwise: all covariates → prediction + PI
 predict(fit, newdata = dat[1:5, ])
 
-# Marginalized: subset of covariates → averages over the rest
+# Marginalized: only trt specified → averages over everything else
 predict(fit, newdata = data.frame(trt = c(0, 1)))
-predict(fit, newdata = data.frame(trt = 1, x2 = c(-1, 0, 1)))
-```
+#>  trt estimate      se ci_lower ci_upper
+#>    0  0.09626 0.04246  0.01304   0.1795
+#>    1  0.34810 0.04981  0.25046   0.4457
 
-![Marginalized prediction curve](man/figures/marginalized_prediction_x1.png)
+# Multiple fixed variables
+predict(fit, newdata = data.frame(trt = 1, x2 = c(-1, 0, 1)))
+#>  trt x2 estimate      se ci_lower ci_upper
+#>    1 -1   0.1554 0.06499  0.02801   0.2828
+#>    1  0   0.5976 0.07993  0.44097   0.7543
+#>    1  1   0.8704 0.07961  0.71440   1.0265
+```
 
 ### Effect transformations (binary outcomes)
 
