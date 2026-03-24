@@ -16,9 +16,9 @@
 
 #' @keywords internal
 .compute_sandwich_se <- function(object, var, at = c(0.25, 0.75),
-                                  type = "quantile", bw = 20L,
-                                  q_lo = 0.10, q_hi = 0.90,
-                                  subset = NULL, ghat = NULL) {
+                                 type = "quantile", bw = 20L,
+                                 q_lo = 0.10, q_hi = 0.90,
+                                 subset = NULL, ghat = NULL) {
 
   X <- object$X
   Y <- object$Y
@@ -57,8 +57,8 @@
 
     y_hon_AB <- rep(NA_real_, n); y_hon_AB[hon_B] <- as.numeric(Y[hon_B])
     res_AB <- aipw_scores_v2_cpp(fs$rfA$forest, X_ord_A, y_hon_AB,
-                                  as.integer(hon_B), ghat,
-                                  col_idx_A, is_bin, a_sc, b_sc)
+                                 as.integer(hon_B), ghat,
+                                 col_idx_A, is_bin, a_sc, b_sc)
     for (j in seq_along(hon_B)) {
       k <- hon_B[j]
       if (!is.na(res_AB$phi[j])) {
@@ -69,8 +69,8 @@
 
     y_hon_BA <- rep(NA_real_, n); y_hon_BA[hon_A] <- as.numeric(Y[hon_A])
     res_BA <- aipw_scores_v2_cpp(fs$rfB$forest, X_ord_B, y_hon_BA,
-                                  as.integer(hon_A), ghat,
-                                  col_idx_B, is_bin, a_sc, b_sc)
+                                 as.integer(hon_A), ghat,
+                                 col_idx_B, is_bin, a_sc, b_sc)
     for (j in seq_along(hon_A)) {
       k <- hon_A[j]
       if (!is.na(res_BA$phi[j])) {
@@ -98,13 +98,13 @@
 
 #' @keywords internal
 .compute_pasr_se <- function(object, var, at = c(0.25, 0.75),
-                              type = "quantile", bw = 20L,
-                              q_lo = 0.10, q_hi = 0.90,
-                              subset = NULL, ghat = NULL, is_bin = FALSE,
-                              R_min = 20L, R_max = 200L,
-                              batch_size = 10L, tol = 0.05,
-                              n_stable = 2L, B_mc = 500L,
-                              nuisance = NULL, verbose = FALSE) {
+                             type = "quantile", bw = 20L,
+                             q_lo = 0.10, q_hi = 0.90,
+                             subset = NULL, ghat = NULL, is_bin = FALSE,
+                             R_min = 20L, R_max = 200L,
+                             batch_size = 10L, tol = 0.05,
+                             n_stable = 2L, B_mc = 500L,
+                             nuisance = NULL, verbose = FALSE) {
 
   X <- object$X; Y <- object$Y; n <- nrow(X)
   if (is.null(nuisance)) nuisance <- estimate_nuisance(object)
@@ -117,9 +117,9 @@
       hon_B <- if (!is.null(subset)) intersect(fs$idxB, subset) else fs$idxB
       hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
       est_AB <- .extract_binary_one_direction(fs$rfA, X, Y, honest_idx = hon_B,
-                                               var = var, ghat = ghat, object = object)
+                                              var = var, ghat = ghat, object = object)
       est_BA <- .extract_binary_one_direction(fs$rfB, X, Y, honest_idx = hon_A,
-                                               var = var, ghat = ghat, object = object)
+                                              var = var, ghat = ghat, object = object)
       split_estimates[r_split] <- (est_AB + est_BA) / 2
     } else {
       x_var <- X[[var]]
@@ -134,9 +134,9 @@
       hon_B <- if (!is.null(subset)) intersect(fs$idxB, subset) else fs$idxB
       hon_A <- if (!is.null(subset)) intersect(fs$idxA, subset) else fs$idxA
       slopes_AB <- .extract_curve_slopes(fs$rfA, X, Y, honest_idx = hon_B,
-                                          var = var, grid = grid, ghat = ghat, object = object)
+                                         var = var, grid = grid, ghat = ghat, object = object)
       slopes_BA <- .extract_curve_slopes(fs$rfB, X, Y, honest_idx = hon_A,
-                                          var = var, grid = grid, ghat = ghat, object = object)
+                                         var = var, grid = grid, ghat = ghat, object = object)
       avg_slopes <- (slopes_AB + slopes_BA) / 2
       intervals <- diff(grid)
       curve_vals <- c(0, cumsum(avg_slopes * intervals))
@@ -165,9 +165,13 @@
   }
 
   .build_rf_args_local <- function(dat, seed_val) {
-    args <- list(formula = y ~ ., data = dat, num.trees = B_mc,
-                 mtry = object$params$mtry, min.node.size = object$params$min.node.size,
-                 sample.fraction = 1.0, replace = FALSE, num.threads = 1L,
+    args <- list(formula = y ~ ., data = dat,
+                 num.trees = object$params$num.trees,
+                 mtry = object$params$mtry,
+                 min.node.size = object$params$min.node.size,
+                 sample.fraction = object$params$sample.fraction,
+                 replace = object$params$replace,
+                 num.threads = 1L,
                  write.forest = TRUE, seed = seed_val,
                  penalize.split.competition = object$params$penalize,
                  softmax.split = object$params$softmax)
@@ -251,13 +255,13 @@
 
 #' @keywords internal
 .compute_pasr_int_se <- function(object, var, by,
-                                  at = c(0.25, 0.75), type = "quantile",
-                                  bw = 20L, q_lo = 0.10, q_hi = 0.90,
-                                  subset = NULL,
-                                  R_min = 20L, R_max = 200L,
-                                  batch_size = 10L, tol = 0.05,
-                                  n_stable = 2L, B_mc = 500L,
-                                  nuisance = NULL, verbose = FALSE) {
+                                 at = c(0.25, 0.75), type = "quantile",
+                                 bw = 20L, q_lo = 0.10, q_hi = 0.90,
+                                 subset = NULL,
+                                 R_min = 20L, R_max = 200L,
+                                 batch_size = 10L, tol = 0.05,
+                                 n_stable = 2L, B_mc = 500L,
+                                 nuisance = NULL, verbose = FALSE) {
 
   X <- object$X; n <- nrow(X)
   if (is.null(nuisance)) nuisance <- estimate_nuisance(object)
@@ -274,17 +278,21 @@
       } else { dat_syn$y <- factor(Y_syn, levels = c(0, 1)) }
 
       fitA <- tryCatch(
-        infForest(y ~ ., data = dat_syn, num.trees = B_mc,
+        infForest(y ~ ., data = dat_syn, num.trees = object$params$num.trees,
                   mtry = object$params$mtry,
                   min.node.size = object$params$min.node.size,
+                  sample.fraction = object$params$sample.fraction,
+                  replace = object$params$replace,
                   penalize = object$params$penalize,
                   softmax = object$params$softmax,
                   seed = r * 2L - 1L, honesty.splits = 1L),
         error = function(e) NULL)
       fitB <- tryCatch(
-        infForest(y ~ ., data = dat_syn, num.trees = B_mc,
+        infForest(y ~ ., data = dat_syn, num.trees = object$params$num.trees,
                   mtry = object$params$mtry,
                   min.node.size = object$params$min.node.size,
+                  sample.fraction = object$params$sample.fraction,
+                  replace = object$params$replace,
                   penalize = object$params$penalize,
                   softmax = object$params$softmax,
                   seed = r * 2L, honesty.splits = 1L),

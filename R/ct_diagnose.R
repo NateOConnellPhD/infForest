@@ -1,23 +1,27 @@
 #' Diagnose Covariance Floor
 #'
-#' Estimates the pointwise covariance floor C_T(x) across a set of prediction
-#' points using PASR. Returns summary statistics and supports visualization
-#' of where prediction uncertainty is highest across the covariate space.
+#' Estimates the pointwise covariance floor C_T(x) across prediction points
+#' using PASR. Returns summary statistics and supports visualization of where
+#' prediction uncertainty is highest across the covariate space.
 #'
 #' The covariance floor is the irreducible variance component of the forest
 #' prediction at each point — the variance that persists even with infinite
-#' trees. It reflects how the forest's weight structure concentrates on
-#' observations near x, and is a function of the local data density and
-#' covariate geometry.
+#' trees. It reflects structural dependence between trees induced by the
+#' forest design acting on the realized covariate configuration.
 #'
-#' @param object An \code{infForest} object.
+#' This is a diagnostic for deployed ranger models. It can inform hyperparameter
+#' tuning: designs with lower median C_T achieve tighter prediction intervals.
+#'
+#' @param object A fitted \code{ranger} object.
+#' @param data Training data frame. Required because ranger does not store
+#'   training data.
 #' @param newdata Data frame of prediction points. Default \code{NULL} uses
-#'   the training data.
-#' @param R Number of synthetic replicates for PASR. Default 50.
-#' @param B_mc Number of trees per paired forest. Default 500.
-#' @param nuisance An \code{infForest_nuisance} object. If \code{NULL},
-#'   estimated automatically.
-#' @param ... Additional arguments passed to \code{estimate_nuisance}.
+#'   training data.
+#' @param R_max Maximum PASR replicates. Default 150.
+#' @param B_mc Trees per paired forest. Default 500.
+#' @param alpha Significance level. Default 0.05.
+#' @param verbose Print progress. Default FALSE.
+#' @param ... Additional arguments passed to \code{pasr_predict}.
 #'
 #' @return An object of class \code{infForest_ct} containing:
 #' \describe{
@@ -31,24 +35,32 @@
 #'
 #' @examples
 #' \dontrun{
-#' fit <- infForest(y ~ ., data = dat, num.trees = 5000)
-#' ct <- ct_diagnose(fit)
+#' rf <- ranger(y ~ ., data = dat_train, num.trees = 5000)
+#' ct <- ct_diagnose(rf, data = dat_train)
 #' ct
 #' plot(ct)
 #' plot(ct, by = "x1")
 #' }
 #'
 #' @export
-ct_diagnose <- function(object, newdata = NULL, R = 50L, B_mc = 500L,
-                        nuisance = NULL, ...) {
+ct_diagnose <- function(object, newdata = NULL, data = NULL, ...) {
 
-  check_infForest(object)
-
-  # Get full PASR prediction results
-  pasr_res <- pasr_predict(object, newdata = newdata, R = R, B_mc = B_mc,
-                           nuisance = nuisance, ...)
-
-  if (is.null(newdata)) newdata <- object$X
+  if (inherits(object, "pasr_ranger")) {
+    # Use existing fitted object — no refitting
+    vn <- object$vn
+    if (is.null(newdata) && !is.null(data)) {
+      newdata <- data[, vn, drop = FALSE]
+    } else if (is.null(newdata)) {
+      stop("newdata is required when passing a pasr_ranger object without data.")
+    }
+    pasr_res <- predict(object, newdata = newdata, unconditional = FALSE)
+    outcome_type <- object$outcome_type
+  } else if (inherits(object, "ranger")) {
+    stop("ct_diagnose() requires a fitted pasr_ranger object from pasr_predict(). ",
+         "Run ps <- pasr_predict(rf, data = ...) first, then ct_diagnose(ps).")
+  } else {
+    stop("ct_diagnose requires a pasr_ranger object from pasr_predict().")
+  }
 
   summ <- list(
     mean   = mean(pasr_res$Ct_hat),
@@ -68,7 +80,7 @@ ct_diagnose <- function(object, newdata = NULL, R = 50L, B_mc = 500L,
     total_var = pasr_res$mc_var + pasr_res$Ct_hat,
     newdata = newdata,
     summary = summ,
-    outcome_type = object$outcome_type
+    outcome_type = outcome_type
   )
   class(out) <- "infForest_ct"
   out

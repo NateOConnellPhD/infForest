@@ -41,7 +41,7 @@
 summary.infForest <- function(object, vars = NULL, type = "quantile",
                               bw = 20L, q_lo = 0.10, q_hi = 0.90,
                               variance = c("sandwich", "pasr", "both"),
-                              ci = TRUE, alpha = 0.05, ...) {
+                              ci = TRUE, alpha = 0.05, p.value = FALSE, ...) {
 
   check_infForest(object)
   variance <- match.arg(variance)
@@ -124,7 +124,7 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
       if (is_cat) {
         # Categorical: handled separately (subset approach)
         results[[v]] <- effect(object, v, at = spec$at,
-                               variance = variance, ci = ci, alpha = alpha)
+                               variance = variance, ci = ci, alpha = alpha, p.value = p.value)
         next
       }
 
@@ -134,7 +134,7 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
         at_raw <- if (!is.null(spec$at)) spec$at else c(0.25, 0.75)
         results[[v]] <- effect(object, v, at = at_raw, type = v_type,
                                bw = bw, q_lo = q_lo, q_hi = q_hi,
-                               variance = variance, ci = ci, alpha = alpha)
+                               variance = variance, ci = ci, alpha = alpha, p.value = p.value)
         next
       }
 
@@ -166,11 +166,11 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
 
         cache_AB <- object$forest_caches[[paste0(r, "_AB")]]
         res_AB <- aipw_scores_multi_cpp(cache_AB, as.integer(var_cols),
-                                        is_bin_vec, a_vec, b_vec, ghat_list)
+                                         is_bin_vec, a_vec, b_vec, ghat_list)
 
         cache_BA <- object$forest_caches[[paste0(r, "_BA")]]
         res_BA <- aipw_scores_multi_cpp(cache_BA, as.integer(var_cols),
-                                        is_bin_vec, a_vec, b_vec, ghat_list)
+                                         is_bin_vec, a_vec, b_vec, ghat_list)
 
         hon_B <- fs$idxB
         hon_A <- fs$idxA
@@ -218,8 +218,12 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
           ci_upper_sandwich = est + z_crit * se_sand,
           se = se_sand,
           ci_lower = est - z_crit * se_sand,
-          ci_upper = est + z_crit * se_sand
+          ci_upper = est + z_crit * se_sand,
+          show_p = p.value
         )
+        if (p.value && se_sand > 0) {
+          out_v$p.value <- 2 * pnorm(-abs(est / se_sand))
+        }
         class(out_v) <- "infForest_effect"
         results[[vname]] <- out_v
       }
@@ -233,7 +237,7 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
       at <- if (!is.null(spec$at)) spec$at else c(0.25, 0.75)
       results[[v]] <- effect(object, v, at = at, type = v_type,
                              bw = bw, q_lo = q_lo, q_hi = q_hi,
-                             variance = variance, ci = ci, alpha = alpha)
+                             variance = variance, ci = ci, alpha = alpha, p.value = p.value)
     }
   }
 
@@ -256,14 +260,14 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
       results[[label]] <- int(object, focal, by = by_var,
                               at = focal_at, type = focal_type,
                               bw = bw, q_lo = q_lo, q_hi = q_hi,
-                              variance = variance, ci = ci, alpha = alpha)
+                              variance = variance, ci = ci, alpha = alpha, p.value = p.value)
     } else {
       by_at <- if (!is.null(spec$by_at)) spec$by_at else list(c(0.10, 0.25), c(0.75, 0.90))
       results[[label]] <- int(object, focal, by = by_var,
                               at = focal_at, type = focal_type,
                               by_at = by_at,
                               bw = bw, q_lo = q_lo, q_hi = q_hi,
-                              variance = variance, ci = ci, alpha = alpha)
+                              variance = variance, ci = ci, alpha = alpha, p.value = p.value)
     }
   }
 
@@ -271,6 +275,18 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
     effects = results,
     n_terms = length(results)
   )
+
+  # Build combined $df from all effect and interaction results
+  df_list <- list()
+  for (nm in names(results)) {
+    r <- results[[nm]]
+    if (!is.null(r$df) && nrow(r$df) > 0) {
+      df_list[[length(df_list) + 1]] <- r$df
+    }
+  }
+  out$df <- if (length(df_list) > 0) do.call(rbind, df_list) else data.frame()
+  rownames(out$df) <- NULL
+
   class(out) <- "infForest_summary"
   out
 }
@@ -496,6 +512,15 @@ print.infForest_summary <- function(x, ...) {
   cat("Inference Forest Effect Summary\n")
   cat(paste(rep("-", 75), collapse = ""), "\n")
 
+  pct <- round((1 - (if (!is.null(x$alpha)) x$alpha else 0.05)) * 100)
+  .fmt_p <- function(p) {
+    if (is.na(p)) return("")
+    if (p < 0.001) sprintf("%.2e", p) else sprintf("%.4f", p)
+  }
+
+  # Compute max variable name width
+  vw <- max(nchar(names(x$effects)), 4)
+
   for (nm in names(x$effects)) {
     eff <- x$effects[[nm]]
 
@@ -503,40 +528,43 @@ print.infForest_summary <- function(x, ...) {
       cat(sprintf("  %s  (interaction: %s by %s)\n", nm, eff$variable, eff$by))
       for (k in seq_len(nrow(eff$subgroups))) {
         unit_label <- if (eff$var_type == "continuous") " (per unit)" else ""
-        line <- sprintf("    %-35s  %8.4f%s",
-                        eff$subgroups$subgroup[k], eff$subgroups$estimate[k], unit_label)
-        if ("se" %in% names(eff$subgroups) && !is.na(eff$subgroups$se[k]))
-          line <- paste0(line, sprintf("  (SE: %.4f)", eff$subgroups$se[k]))
-        cat(line, "\n")
+        se_txt <- if ("se" %in% names(eff$subgroups) && !is.na(eff$subgroups$se[k]))
+          sprintf("  (SE: %.4f)", eff$subgroups$se[k]) else ""
+        cat(sprintf("    %-30s  %.4f%s%s\n",
+                    eff$subgroups$subgroup[k], eff$subgroups$estimate[k], unit_label, se_txt))
       }
       for (k in seq_len(nrow(eff$differences))) {
-        line <- sprintf("    Diff: %-40s  %8.4f",
-                        paste(eff$differences$hi[k], "-", eff$differences$lo[k]),
-                        eff$differences$difference[k])
+        diff_lbl <- paste("Diff:", eff$differences$hi[k], "-", eff$differences$lo[k])
+        se_txt <- ""
         if ("se" %in% names(eff$differences) && !is.na(eff$differences$se[k]))
-          line <- paste0(line, sprintf("  (SE: %.4f, 95%% CI: [%.4f, %.4f])",
-                                       eff$differences$se[k],
-                                       eff$differences$ci_lower[k],
-                                       eff$differences$ci_upper[k]))
-        cat(line, "\n")
+          se_txt <- sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])",
+                            eff$differences$se[k], pct,
+                            eff$differences$ci_lower[k], eff$differences$ci_upper[k])
+        cat(sprintf("    %-30s  %.4f%s\n", diff_lbl, eff$differences$difference[k], se_txt))
       }
 
     } else if (inherits(eff, "infForest_effect")) {
       if (eff$var_type == "binary") {
-        line <- sprintf("  %-15s  binary      %8.4f", nm, eff$estimate)
-        if (!is.null(eff$se))
-          line <- paste0(line, sprintf("  (SE: %.4f, 95%% CI: [%.4f, %.4f])",
-                                       eff$se, eff$ci_lower, eff$ci_upper))
-        cat(line, "\n")
+        se_txt <- if (!is.null(eff$se))
+          sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])", eff$se, pct, eff$ci_lower, eff$ci_upper) else ""
+        p_txt <- if (!is.null(eff$p.value) && !is.na(eff$p.value))
+          sprintf("  p: %s", .fmt_p(eff$p.value)) else ""
+        cat(sprintf("  %-*s  binary  %.4f%s%s\n", vw, nm, eff$estimate, se_txt, p_txt))
       } else {
         df <- eff$contrasts
         for (k in seq_len(nrow(df))) {
-          label <- if (k == 1) sprintf("%-15s", nm) else sprintf("%-15s", "")
-          line <- sprintf("  %s  %-16s  %8.4f  (per unit)", label, df$contrast[k], df$estimate[k])
-          if ("se" %in% names(df) && !is.na(df$se[k]))
-            line <- paste0(line, sprintf("  (SE: %.4f, 95%% CI: [%.4f, %.4f])",
-                                         df$se[k], df$ci_lower[k], df$ci_upper[k]))
-          cat(line, "\n")
+          vlabel <- if (k == 1) nm else ""
+          se_col <- if ("se" %in% names(df)) "se" else if ("se_sandwich" %in% names(df)) "se_sandwich" else NULL
+          se_txt <- ""
+          if (!is.null(se_col) && !is.na(df[[se_col]][k])) {
+            ci_lo <- if ("ci_lower" %in% names(df)) df$ci_lower[k] else df$ci_lower_sandwich[k]
+            ci_hi <- if ("ci_upper" %in% names(df)) df$ci_upper[k] else df$ci_upper_sandwich[k]
+            se_txt <- sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])", df[[se_col]][k], pct, ci_lo, ci_hi)
+          }
+          p_txt <- if ("p.value" %in% names(df) && !is.na(df$p.value[k]))
+            sprintf("  p: %s", .fmt_p(df$p.value[k])) else ""
+          cat(sprintf("  %-*s  %-12s  %.4f  (per unit)%s%s\n",
+                      vw, vlabel, df$contrast[k], df$estimate[k], se_txt, p_txt))
         }
       }
     }

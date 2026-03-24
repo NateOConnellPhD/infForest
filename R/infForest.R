@@ -125,7 +125,6 @@ infForest <- function(formula,
   }
 
   # --- Fit forests (cross-fitted honest estimation) ---
-  forests <- list()
   fold_list <- list()
 
   # Override honesty.splits if fold_assignments provided
@@ -133,45 +132,49 @@ infForest <- function(formula,
     honesty.splits <- length(fold_assignments)
   }
 
+  # Pre-generate fold assignments (must be deterministic)
   for (r in seq_len(honesty.splits)) {
-    # Fold assignment: use provided or generate random
     if (!is.null(fold_assignments)) {
-      fold <- fold_assignments[[r]]
+      fold_list[[r]] <- fold_assignments[[r]]
     } else {
       fold_seed <- if (!is.null(seed)) seed * 13L + r * 1000L else sample.int(.Machine$integer.max, 1)
       set.seed(fold_seed)
-      fold <- sample(rep(1:2, length.out = n))
+      fold_list[[r]] <- sample(rep(1:2, length.out = n))
     }
-    fold_list[[r]] <- fold
+  }
 
+  # Closure-safe copies
+  outcome_type_local <- outcome_type
+  seed_local <- seed
+
+  .fit_one_split <- function(r) {
+    fold <- fold_list[[r]]
     idxA <- which(fold == 1)
     idxB <- which(fold == 2)
 
-    # Forest A: build on fold A
     datA <- X[idxA, , drop = FALSE]
-    if (outcome_type == "continuous") {
-      datA$y <- Y[idxA]
-    } else {
-      datA$y <- factor(Y[idxA], levels = c(0, 1))
-    }
-    seedA <- if (!is.null(seed)) seed + r * 100L + 1L else NULL
+    if (outcome_type_local == "continuous") { datA$y <- Y[idxA]
+    } else { datA$y <- factor(Y[idxA], levels = c(0, 1)) }
+    seedA <- if (!is.null(seed_local)) seed_local + r * 100L + 1L else NULL
     rfA <- do.call(inf.ranger::ranger, build_ranger_args(datA, seedA))
 
-    # Forest B: build on fold B
     datB <- X[idxB, , drop = FALSE]
-    if (outcome_type == "continuous") {
-      datB$y <- Y[idxB]
-    } else {
-      datB$y <- factor(Y[idxB], levels = c(0, 1))
-    }
-    seedB <- if (!is.null(seed)) seed + r * 100L + 2L else NULL
+    if (outcome_type_local == "continuous") { datB$y <- Y[idxB]
+    } else { datB$y <- factor(Y[idxB], levels = c(0, 1)) }
+    seedB <- if (!is.null(seed_local)) seed_local + r * 100L + 2L else NULL
     rfB <- do.call(inf.ranger::ranger, build_ranger_args(datB, seedB))
 
-    forests[[r]] <- list(
-      rfA = rfA, rfB = rfB,
-      idxA = idxA, idxB = idxB,
-      fold = fold
-    )
+    list(rfA = rfA, rfB = rfB, idxA = idxA, idxB = idxB, fold = fold)
+  }
+
+  has_future <- requireNamespace("future.apply", quietly = TRUE)
+  use_parallel <- has_future && !inherits(future::plan(), "sequential")
+
+  if (use_parallel) {
+    forests <- future.apply::future_lapply(seq_len(honesty.splits),
+                                            .fit_one_split, future.seed = TRUE)
+  } else {
+    forests <- lapply(seq_len(honesty.splits), .fit_one_split)
   }
 
   # --- Cache ranger-ordered X matrix ---

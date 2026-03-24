@@ -14,6 +14,7 @@
   variance = c("sandwich", "pasr", "both"),
   ci = TRUE,
   alpha = 0.05,
+  p.value = FALSE,
   ...
 )
 }

@@ -3,7 +3,7 @@
 \name{effect_curve}
 \alias{effect_curve}
 \alias{effect_curve.infForest}
-\title{Estimate the Nonlinear Effect Curve for a Continuous Predictor}
+\title{Nonlinear Effect Curve for a Continuous Predictor}
 \usage{
 effect_curve(object, ...)
 
@@ -13,58 +13,46 @@ effect_curve(object, ...)
   q_lo = 0.1,
   q_hi = 0.9,
   bw = 20L,
-  ref = NULL,
+  type = c("slope", "level"),
+  alpha = 0.05,
   propensity_trees = 2000L,
+  R = 50L,
   ...
 )
 }
 \arguments{
 \item{object}{An \code{infForest} object.}
 
-\item{...}{Additional arguments (currently unused).}
+\item{...}{Additional arguments passed to PASR internals.}
 
 \item{var}{Character; name of a continuous predictor variable.}
 
 \item{q_lo, q_hi}{Quantiles defining the grid bounds. Default 0.10 and 0.90.}
 
-\item{bw}{Bandwidth: target number of honest observations per grid interval.
-Controls grid density. Higher values = smoother curve. Default 20.}
+\item{bw}{Bandwidth: target honest observations per grid interval. Default 20.}
 
-\item{ref}{Reference value for the curve (curve is zero at this point).
-Default: median of the variable.}
+\item{type}{\code{"slope"} (default) or \code{"level"}.}
 
-\item{propensity_trees}{Number of trees for the propensity model. Default 2000.}
+\item{alpha}{Significance level. Default 0.05.}
+
+\item{propensity_trees}{Trees for the propensity model. Default 2000.}
+
+\item{R}{Number of PASR replicates for type = "level". Default 50.}
 }
 \value{
-A list of class \code{infForest_curve} containing:
-\describe{
-  \item{variable}{Variable name.}
-  \item{grid}{Grid points at which the curve is evaluated.}
-  \item{curve}{Curve values (relative to reference).}
-  \item{slopes}{Per-interval AIPW-adjusted local slopes.}
-  \item{ref}{Reference value.}
-  \item{n_intervals}{Number of grid intervals used.}
-}
+A list of class \code{infForest_curve}.
 }
 \description{
-Constructs the effect curve tracing how the population-averaged outcome
-varies with a continuous predictor, using honest AIPW estimation. The
-curve captures nonlinear and non-monotone relationships without functional
-form assumptions. Any contrast between two points on the curve recovers
-the effect estimate from \code{effect()}.
+Estimates how a continuous predictor relates to the outcome across its
+support. Two visualization modes:
 }
 \details{
-The estimator combines honest forest predictions at each grid point
-(working model) with propensity-weighted honest residuals (debiasing
-correction). The propensity correction is computed once and reused across
-all grid intervals, since confounding bias is a property of the X_j-X_{-j}
-correlation structure, not of where on X_j's support you evaluate.
-}
-\examples{
-\dontrun{
-fit <- infForest(y ~ ., data = dat)
-ec <- effect_curve(fit, "age")
-plot(ec)
-}
+\strong{Slope curve} (default): Local AIPW slopes at each grid interval
+with pointwise sandwich bands. Shows where the effect is strongest,
+weakest, or changes direction. Flat = linear; changing = nonlinear;
+crossing zero = no effect in that region. Fast (no extra computation).
 
+\strong{Level curve} (\code{type = "level"}): Adjusted mean E[Y | X_j = x]
+at each grid point with PASR bands. The forest analog of a GLM fitted
+curve with CI bands. Requires PASR resampling (slower).
 }

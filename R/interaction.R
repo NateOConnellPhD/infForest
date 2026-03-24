@@ -53,6 +53,7 @@ interaction.infForest <- function(object, var, by,
                                   subset = NULL,
                                   variance = c("sandwich", "pasr", "both"),
                                   ci = TRUE, alpha = 0.05,
+                                  p.value = FALSE,
                                   R_min = 20L, R_max = 200L,
                                   batch_size = 10L, tol = 0.05,
                                   n_stable = 2L, B_mc = 500L,
@@ -85,6 +86,19 @@ interaction.infForest <- function(object, var, by,
   } else {
     stop("Categorical by-variables with >2 levels not yet supported.")
   }
+
+  # P-value for interaction differences (H0: no effect modification)
+  if (p.value && !is.null(result$differences)) {
+    result$differences$p.value <- NA_real_
+    for (k in seq_len(nrow(result$differences))) {
+      diff_est <- result$differences$difference[k]
+      diff_se <- if ("se" %in% names(result$differences)) result$differences$se[k] else NA_real_
+      if (!is.na(diff_se) && diff_se > 0) {
+        result$differences$p.value[k] <- 2 * pnorm(-abs(diff_est / diff_se))
+      }
+    }
+  }
+  result$show_p <- p.value
 
   result
 }
@@ -188,8 +202,61 @@ int <- function(...) interaction(...)
       out$rho_V <- se_sand_diff^2 / se_pasr_diff^2
   }
 
+  out$df <- .build_interaction_df(out)
   class(out) <- "infForest_interaction"
   out
+}
+
+
+# ============================================================
+# Universal data frame builder for interaction objects
+# ============================================================
+#' @keywords internal
+.build_interaction_df <- function(out) {
+  rows <- list()
+  z_crit <- if (!is.null(out$alpha)) qnorm(1 - out$alpha / 2) else 1.96
+  var_label <- paste0(out$variable, ":", out$by)
+
+  # Subgroup effects
+  sg <- out$subgroups
+  for (i in seq_len(nrow(sg))) {
+    se_i <- if ("se" %in% names(sg)) sg$se[i] else NA_real_
+    rows[[length(rows) + 1]] <- data.frame(
+      variable = var_label,
+      type = paste0(out$var_type, " x ", out$by_type),
+      estimand = "subgroup",
+      level = sg$subgroup[i],
+      estimate = sg$estimate[i],
+      se = se_i,
+      ci_lower = if (!is.na(se_i)) sg$estimate[i] - z_crit * se_i else NA_real_,
+      ci_upper = if (!is.na(se_i)) sg$estimate[i] + z_crit * se_i else NA_real_,
+      p.value = NA_real_,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  # Differences
+  dd <- out$differences
+  for (i in seq_len(nrow(dd))) {
+    se_i <- if ("se" %in% names(dd)) dd$se[i] else NA_real_
+    ci_lo <- if ("ci_lower" %in% names(dd)) dd$ci_lower[i] else NA_real_
+    ci_hi <- if ("ci_upper" %in% names(dd)) dd$ci_upper[i] else NA_real_
+    rows[[length(rows) + 1]] <- data.frame(
+      variable = var_label,
+      type = paste0(out$var_type, " x ", out$by_type),
+      estimand = "interaction",
+      level = paste(dd$hi[i], "vs", dd$lo[i]),
+      estimate = dd$difference[i],
+      se = se_i,
+      ci_lower = ci_lo,
+      ci_upper = ci_hi,
+      p.value = if ("p.value" %in% names(dd)) dd$p.value[i] else NA_real_,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  if (length(rows) == 0) return(data.frame())
+  do.call(rbind, rows)
 }
 
 
@@ -265,6 +332,7 @@ int <- function(...) interaction(...)
     subgroups = subgroups,
     differences = differences
   )
+  out$df <- .build_interaction_df(out)
   class(out) <- "infForest_interaction"
   out
 }
@@ -382,6 +450,13 @@ print.infForest_interaction <- function(x, ...) {
   cat("  By:        ", x$by, "(", x$by_type, ")\n\n")
 
   pct <- round((1 - (if (!is.null(x$alpha)) x$alpha else 0.05)) * 100)
+  show_p <- isTRUE(x$show_p)
+
+  .fmt_p <- function(p) {
+    if (is.na(p)) return("NA")
+    if (p < 0.001) return(sprintf("%.2e", p))
+    sprintf("%.4f", p)
+  }
 
   cat("  Subgroup effects:\n")
   for (k in seq_len(nrow(x$subgroups))) {
@@ -403,6 +478,8 @@ print.infForest_interaction <- function(x, ...) {
       line <- paste0(line, sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])",
                                     x$differences$se[k], pct,
                                     x$differences$ci_lower[k], x$differences$ci_upper[k]))
+    if (show_p && "p.value" %in% names(x$differences) && !is.na(x$differences$p.value[k]))
+      line <- paste0(line, sprintf("  p: %s", .fmt_p(x$differences$p.value[k])))
     cat(line, "\n")
   }
 

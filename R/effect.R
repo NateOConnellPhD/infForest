@@ -47,8 +47,9 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
                              type = c("quantile", "value"),
                              q_lo = 0.10, q_hi = 0.90,
                              bw = 20L, subset = NULL,
-                             variance = c("sandwich", "pasr", "both"),
+                             variance = c("pasr", "sandwich", "both"),
                              ci = TRUE, alpha = 0.05,
+                             p.value = FALSE, marginals = FALSE,
                              propensity_trees = 2000L,
                              ghat = NULL,
                              R_min = 20L, R_max = 200L,
@@ -57,6 +58,7 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
                              nuisance = NULL, verbose = FALSE, ...) {
 
   check_infForest(object)
+  pasr <- object$pasr  # NULL if pasr() hasn't been run
   check_varname(object, var)
 
   type <- match.arg(type)
@@ -85,6 +87,8 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
       n_intervals = 1L,
       subset = subset
     )
+    if (marginals && !is.null(est$marginal_means))
+      out$marginal_means <- est$marginal_means
     est_scalar <- est$psi
 
   } else if (var_type == "continuous") {
@@ -159,6 +163,27 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
       at = at, at_vals = at_vals, at_labels = at_labels,
       type = type, n_intervals = n_intervals, subset = subset
     )
+    if (marginals) {
+      if (is.null(pasr)) {
+        message("Note: marginal means for continuous variables require PASR ",
+                "(slower). Pass a pasr() object for faster computation.")
+      }
+      nd <- data.frame(dummy = at_vals)
+      colnames(nd) <- var
+      # Pass pre-computed propensity to avoid refitting
+      prop_list <- list()
+      prop_list[[var]] <- list(ghat = ghat,
+                                is_binary = is_bin,
+                                x_var = object$X[[var]])
+      mpred <- predict(object, newdata = nd, R = 50L, propensities = prop_list)
+      out$marginal_means <- data.frame(
+        level = at_labels,
+        value = at_vals,
+        mean = mpred$estimate,
+        se = mpred$se,
+        stringsAsFactors = FALSE
+      )
+    }
     est_scalar <- contrasts_df$estimate[1]
 
   } else if (var_type == "categorical") {
@@ -220,6 +245,10 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
       n_intervals = 1L,
       subset = subset
     )
+    if (marginals) {
+      out$marginal_means <- .compute_categorical_means(
+        object, var, all_levels, ghat, subset)
+    }
     est_scalar <- contrasts_df$estimate[1]
 
   } else {
@@ -235,6 +264,15 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     z_crit <- qnorm(1 - alpha / 2)
     se_sand <- NULL; se_pasr <- NULL
 
+    if (do_pasr && is.null(pasr)) {
+      message("PASR variance requested but pasr() has not been run. ",
+              "Run pasr(", deparse(substitute(object)), ") first, then re-call. ",
+              "Falling back to sandwich variance.")
+      do_pasr <- FALSE
+      if (!do_sandwich) do_sandwich <- TRUE
+      variance <- "sandwich"
+    }
+
     out$alpha <- alpha
     out$variance_method <- variance
 
@@ -246,19 +284,37 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
         out$ci_upper_sandwich <- est_scalar + z_crit * se_sand
       }
       if (do_pasr) {
-        pasr_result <- .compute_pasr_se(
-          object, var, at = at, type = type,
-          bw = bw, q_lo = q_lo, q_hi = q_hi,
-          subset = subset, ghat = ghat, is_bin = is_bin,
-          R_min = R_min, R_max = R_max, batch_size = batch_size,
-          tol = tol, n_stable = n_stable, B_mc = B_mc,
-          nuisance = nuisance, verbose = verbose)
-        se_pasr <- pasr_result$se
-        out$se_pasr <- se_pasr
-        out$C_psi <- pasr_result$C_psi
-        out$V_psi <- pasr_result$V_psi
-        out$R_used <- pasr_result$R_used
-        out$converged <- pasr_result$converged
+        if (!is.null(pasr)) {
+          col_idx <- get_ranger_col_idx(object$forests[[1]]$rfA, var)
+          nt <- .get_n_threads()
+          # Single C++ call extracts all R replicates
+          batch_res <- pasr_extract_all_binary_cpp(pasr$caches, ghat, col_idx,
+                                                    n_threads = nt)
+          psi_A <- batch_res$psi_A
+          psi_B <- batch_res$psi_B
+          C_psi <- max(cov(psi_A, psi_B), 0)
+          V_psi_over_R <- var(c(psi_A, psi_B)) / (2 * pasr$R)
+          se_pasr <- sqrt(C_psi + V_psi_over_R)
+          out$se_pasr <- se_pasr
+          out$C_psi <- C_psi
+          out$V_psi <- V_psi_over_R
+          out$R_used <- pasr$R
+          out$converged <- TRUE
+        } else {
+          pasr_result <- .compute_pasr_se(
+            object, var, at = at, type = type,
+            bw = bw, q_lo = q_lo, q_hi = q_hi,
+            subset = subset, ghat = ghat, is_bin = is_bin,
+            R_min = R_min, R_max = R_max, batch_size = batch_size,
+            tol = tol, n_stable = n_stable, B_mc = B_mc,
+            nuisance = nuisance, verbose = verbose)
+          se_pasr <- pasr_result$se
+          out$se_pasr <- se_pasr
+          out$C_psi <- pasr_result$C_psi
+          out$V_psi <- pasr_result$V_psi
+          out$R_used <- pasr_result$R_used
+          out$converged <- pasr_result$converged
+        }
         out$ci_lower_pasr <- est_scalar - z_crit * se_pasr
         out$ci_upper_pasr <- est_scalar + z_crit * se_pasr
       }
@@ -268,15 +324,64 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
       out$ci_upper <- est_scalar + z_crit * se_primary
 
     } else if (var_type == "categorical") {
-      # Categorical: SE already computed inline by .categorical_pairwise_effect
       n_contr <- nrow(out$contrasts)
       z_crit_cat <- qnorm(1 - alpha / 2)
-      out$contrasts$ci_lower_sandwich <- out$contrasts$estimate - z_crit_cat * out$contrasts$se_sandwich
-      out$contrasts$ci_upper_sandwich <- out$contrasts$estimate + z_crit_cat * out$contrasts$se_sandwich
-      out$contrasts$se <- out$contrasts$se_sandwich
-      out$contrasts$ci_lower <- out$contrasts$ci_lower_sandwich
-      out$contrasts$ci_upper <- out$contrasts$ci_upper_sandwich
-      out$se_sandwich <- out$contrasts$se_sandwich[1]
+
+      if (do_pasr && !is.null(pasr)) {
+        nt <- .get_n_threads()
+
+        out$contrasts$se_pasr <- NA_real_
+        out$contrasts$ci_lower_pasr <- NA_real_
+        out$contrasts$ci_upper_pasr <- NA_real_
+
+        for (k in seq_len(n_contr)) {
+          lev_to <- out$contrasts$to[k]
+          lev_from <- out$contrasts$from[k]
+
+          x_var_cat <- object$X[[var]]
+          idx_to <- which(as.character(x_var_cat) == lev_to)
+          idx_from <- which(as.character(x_var_cat) == lev_from)
+          idx_pair <- sort(c(idx_to, idx_from))
+          x_binary <- rep(NA_real_, nrow(object$X))
+          x_binary[idx_to] <- 1; x_binary[idx_from] <- 0
+          X_sub <- object$X[idx_pair, , drop = FALSE]
+          X_sub[[var]] <- x_binary[idx_pair]
+          prop <- .fit_propensity(X_sub, var, is_binary = TRUE)
+          ghat_pair <- rep(NA_real_, nrow(object$X))
+          ghat_pair[idx_pair] <- prop$ghat
+
+          all_levels <- if (is.factor(x_var_cat)) levels(x_var_cat) else sort(unique(as.character(x_var_cat)))
+          code_to <- as.numeric(factor(lev_to, levels = all_levels))
+          code_from <- as.numeric(factor(lev_from, levels = all_levels))
+          col_idx <- get_ranger_col_idx(object$forests[[1]]$rfA, var)
+
+          batch_res <- pasr_extract_all_binary_cpp(
+            pasr$caches, ghat_pair, col_idx,
+            code_to = code_to, code_from = code_from,
+            indicator_ = x_binary, n_threads = nt)
+          C_psi <- max(cov(batch_res$psi_A, batch_res$psi_B), 0)
+          V_psi <- var(c(batch_res$psi_A, batch_res$psi_B)) / (2 * pasr$R)
+          se_k <- sqrt(C_psi + V_psi)
+          out$contrasts$se_pasr[k] <- se_k
+          out$contrasts$ci_lower_pasr[k] <- out$contrasts$estimate[k] - z_crit_cat * se_k
+          out$contrasts$ci_upper_pasr[k] <- out$contrasts$estimate[k] + z_crit_cat * se_k
+        }
+      }
+
+      if (do_sandwich) {
+        out$contrasts$ci_lower_sandwich <- out$contrasts$estimate - z_crit_cat * out$contrasts$se_sandwich
+        out$contrasts$ci_upper_sandwich <- out$contrasts$estimate + z_crit_cat * out$contrasts$se_sandwich
+      }
+
+      if (do_pasr && !is.null(pasr) && !all(is.na(out$contrasts$se_pasr))) {
+        out$contrasts$se <- out$contrasts$se_pasr
+        out$contrasts$ci_lower <- out$contrasts$ci_lower_pasr
+        out$contrasts$ci_upper <- out$contrasts$ci_upper_pasr
+      } else {
+        out$contrasts$se <- out$contrasts$se_sandwich
+        out$contrasts$ci_lower <- out$contrasts$ci_lower_sandwich
+        out$contrasts$ci_upper <- out$contrasts$ci_upper_sandwich
+      }
       out$se <- out$contrasts$se[1]
 
     } else {
@@ -303,24 +408,57 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
       }
 
       if (do_pasr) {
-        # PASR for primary contrast only (expensive)
-        pair_at <- c(out$contrasts$from_val[1], out$contrasts$to_val[1])
-        pasr_result <- .compute_pasr_se(
-          object, var, at = pair_at, type = "value",
-          bw = bw, q_lo = q_lo, q_hi = q_hi,
-          subset = subset, ghat = ghat, is_bin = is_bin,
-          R_min = R_min, R_max = R_max, batch_size = batch_size,
-          tol = tol, n_stable = n_stable, B_mc = B_mc,
-          nuisance = nuisance, verbose = verbose)
-        se_pasr <- pasr_result$se
-        out$se_pasr <- se_pasr
-        out$C_psi <- pasr_result$C_psi
-        out$V_psi <- pasr_result$V_psi
-        out$R_used <- pasr_result$R_used
-        out$converged <- pasr_result$converged
-        out$contrasts$se_pasr[1] <- se_pasr
-        out$contrasts$ci_lower_pasr[1] <- out$contrasts$estimate[1] - z_crit * se_pasr
-        out$contrasts$ci_upper_pasr[1] <- out$contrasts$estimate[1] + z_crit * se_pasr
+        if (!is.null(pasr)) {
+          col_idx <- get_ranger_col_idx(object$forests[[1]]$rfA, var)
+          nt <- .get_n_threads()
+          x_var <- object$X[[var]]
+          n_honest <- nrow(object$X) %/% 2
+          n_intervals <- max(1L, as.integer(n_honest / bw))
+
+          for (k in seq_len(n_contr)) {
+            pair_at <- c(out$contrasts$from_val[k], out$contrasts$to_val[k])
+            a_val <- max(pair_at); b_val_k <- min(pair_at)
+            grid_lo <- min(pair_at, unname(quantile(x_var, q_lo)))
+            grid_hi <- max(pair_at, unname(quantile(x_var, q_hi)))
+            grid <- seq(grid_lo, grid_hi, length.out = n_intervals + 1)
+
+            batch_res <- pasr_extract_all_continuous_cpp(
+              pasr$caches, ghat, col_idx, grid, a_val, b_val_k,
+              n_threads = nt)
+            psi_A <- batch_res$psi_A
+            psi_B <- batch_res$psi_B
+            C_psi_k <- max(cov(psi_A, psi_B), 0)
+            V_psi_k <- var(c(psi_A, psi_B)) / (2 * pasr$R)
+            se_k <- sqrt(C_psi_k + V_psi_k)
+            out$contrasts$se_pasr[k] <- se_k
+            out$contrasts$ci_lower_pasr[k] <- out$contrasts$estimate[k] - z_crit * se_k
+            out$contrasts$ci_upper_pasr[k] <- out$contrasts$estimate[k] + z_crit * se_k
+          }
+          se_pasr <- out$contrasts$se_pasr[1]
+          out$se_pasr <- se_pasr
+          out$C_psi <- max(cov(psi_A, psi_B), 0)
+          out$R_used <- pasr$R
+          out$converged <- TRUE
+        } else {
+          # PASR for primary contrast only (expensive)
+          pair_at <- c(out$contrasts$from_val[1], out$contrasts$to_val[1])
+          pasr_result <- .compute_pasr_se(
+            object, var, at = pair_at, type = "value",
+            bw = bw, q_lo = q_lo, q_hi = q_hi,
+            subset = subset, ghat = ghat, is_bin = is_bin,
+            R_min = R_min, R_max = R_max, batch_size = batch_size,
+            tol = tol, n_stable = n_stable, B_mc = B_mc,
+            nuisance = nuisance, verbose = verbose)
+          se_pasr <- pasr_result$se
+          out$se_pasr <- se_pasr
+          out$C_psi <- pasr_result$C_psi
+          out$V_psi <- pasr_result$V_psi
+          out$R_used <- pasr_result$R_used
+          out$converged <- pasr_result$converged
+          out$contrasts$se_pasr[1] <- se_pasr
+          out$contrasts$ci_lower_pasr[1] <- out$contrasts$estimate[1] - z_crit * se_pasr
+          out$contrasts$ci_upper_pasr[1] <- out$contrasts$estimate[1] + z_crit * se_pasr
+        }
       }
 
       # Convenience aliases
@@ -342,6 +480,39 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
     if (!is.null(se_pasr) && !is.null(se_sand))
       out$rho_V <- se_sand^2 / se_pasr^2
   }
+
+  # P-values (optional, two-sided Wald test H0: psi = 0)
+  if (p.value && ci) {
+    if (var_type == "binary") {
+      se_use <- out$se
+      if (!is.null(se_use) && !is.na(se_use) && se_use > 0) {
+        z_stat <- out$estimate / se_use
+        out$p.value <- 2 * pnorm(-abs(z_stat))
+      }
+    } else if (var_type == "categorical") {
+      out$contrasts$p.value <- NA_real_
+      for (k in seq_len(nrow(out$contrasts))) {
+        se_k <- out$contrasts$se[k]
+        if (!is.na(se_k) && se_k > 0) {
+          out$contrasts$p.value[k] <- 2 * pnorm(-abs(out$contrasts$estimate[k] / se_k))
+        }
+      }
+    } else {
+      # Continuous: per-contrast p-values
+      out$contrasts$p.value <- NA_real_
+      for (k in seq_len(nrow(out$contrasts))) {
+        se_k <- out$contrasts$se[k]
+        if (!is.na(se_k) && se_k > 0) {
+          out$contrasts$p.value[k] <- 2 * pnorm(-abs(out$contrasts$estimate[k] / se_k))
+        }
+      }
+    }
+  }
+  out$show_p <- p.value
+  out$marginals_requested <- marginals
+
+  # Build $df — universal data frame output
+  out$df <- .build_effect_df(out)
 
   class(out) <- "infForest_effect"
   out
@@ -596,6 +767,12 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   phi_sum <- numeric(n)
   phi_cnt <- integer(n)
 
+  # Accumulate counterfactual predictions for adjusted means
+  fhat_a_sum <- numeric(n)  # fhat at X_j = 1
+  fhat_b_sum <- numeric(n)  # fhat at X_j = 0
+  fhat_obs_sum <- numeric(n)
+  fhat_cnt <- integer(n)
+
   has_cache <- !is.null(object$forest_caches)
 
   for (r in seq_along(object$forests)) {
@@ -638,9 +815,24 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
       k <- hon_B[j]
       if (!is.na(res_AB$phi[j])) { phi_sum[k] <- phi_sum[k] + res_AB$phi[j]; phi_cnt[k] <- phi_cnt[k] + 1L }
     }
+    # Counterfactual predictions for adjusted means (once per direction, not per obs)
+    if (!is.null(res_AB$fhat_a)) {
+      accumulate_binary_scores_cpp(
+        fhat_a_sum, fhat_b_sum, fhat_obs_sum, fhat_cnt,
+        res_AB$fhat_a, res_AB$fhat_b, res_AB$fhat_obs,
+        as.integer(hon_B)
+      )
+    }
     for (j in seq_along(hon_A)) {
       k <- hon_A[j]
       if (!is.na(res_BA$phi[j])) { phi_sum[k] <- phi_sum[k] + res_BA$phi[j]; phi_cnt[k] <- phi_cnt[k] + 1L }
+    }
+    if (!is.null(res_BA$fhat_a)) {
+      accumulate_binary_scores_cpp(
+        fhat_a_sum, fhat_b_sum, fhat_obs_sum, fhat_cnt,
+        res_BA$fhat_a, res_BA$fhat_b, res_BA$fhat_obs,
+        as.integer(hon_A)
+      )
     }
   }
 
@@ -652,11 +844,49 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
   psi_bar <- mean(phi_avg[valid])
   V_IF <- sum((phi_avg[valid] - psi_bar)^2) / (n_valid * (n_valid - 1))
 
+  # Compute adjusted means at each level
+  # phi_k(x) = fhat(X_{j=x}(k)) + omega_k * R_k
+  # omega_k * R_k is the AIPW correction, constant across query points
+  marginal_means <- NULL
+  fv <- fhat_cnt > 0
+  if (sum(fv) > 1) {
+    fa_avg <- fhat_a_sum[fv] / fhat_cnt[fv]
+    fb_avg <- fhat_b_sum[fv] / fhat_cnt[fv]
+    fo_avg <- fhat_obs_sum[fv] / fhat_cnt[fv]
+
+    x_j <- as.numeric(object$X[[var]][fv])
+    ghat_v <- ghat[fv]
+    Y_v <- as.numeric(object$Y[fv])
+    gc_v <- pmax(0.025, pmin(0.975, ghat_v))
+    res_v <- Y_v - fo_avg
+
+    # Level-specific IPW weights (not contrast weights)
+    # phi_k(1) = fhat_a + [1(X_jk=1) / P(X_j=1)] * R_k
+    # phi_k(0) = fhat_b + [1(X_jk=0) / P(X_j=0)] * R_k
+    omega_1 <- x_j / gc_v                # 1(X_jk=1) / ghat for level 1
+    omega_0 <- (1 - x_j) / (1 - gc_v)   # 1(X_jk=0) / (1-ghat) for level 0
+
+    phi_a <- fa_avg + omega_1 * res_v
+    phi_b <- fb_avg + omega_0 * res_v
+    nv <- length(phi_a)
+
+    marginal_means <- data.frame(
+      level = c(1, 0),
+      mean = c(mean(phi_a), mean(phi_b)),
+      se = c(sd(phi_a) / sqrt(nv), sd(phi_b) / sqrt(nv)),
+      stringsAsFactors = FALSE
+    )
+    attr(marginal_means, "phi_1") <- phi_a
+    attr(marginal_means, "phi_0") <- phi_b
+    attr(marginal_means, "n_valid") <- nv
+  }
+
   list(
     psi = mean(psi_splits),
     per_split = psi_splits,
     diagnostics = diag_list,
-    sandwich_se = sqrt(V_IF)
+    sandwich_se = sqrt(V_IF),
+    marginal_means = marginal_means
   )
 }
 
@@ -750,6 +980,87 @@ effect.infForest <- function(object, var, at = c(0.25, 0.75),
 
 
 # ============================================================
+# Universal data frame builder for effect objects
+# ============================================================
+
+#' @keywords internal
+.build_effect_df <- function(out) {
+  rows <- list()
+  z_crit <- if (!is.null(out$alpha)) qnorm(1 - out$alpha / 2) else 1.96
+
+  # Marginal means (if present)
+  if (!is.null(out$marginal_means)) {
+    mm <- out$marginal_means
+    for (i in seq_len(nrow(mm))) {
+      rows[[length(rows) + 1]] <- data.frame(
+        variable = out$variable,
+        type = out$var_type,
+        estimand = "mean",
+        level = as.character(mm$level[i]),
+        estimate = mm$mean[i],
+        se = mm$se[i],
+        ci_lower = mm$mean[i] - z_crit * mm$se[i],
+        ci_upper = mm$mean[i] + z_crit * mm$se[i],
+        p.value = NA_real_,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+
+  # Contrasts
+  if (out$var_type == "binary") {
+    rows[[length(rows) + 1]] <- data.frame(
+      variable = out$variable,
+      type = out$var_type,
+      estimand = "contrast",
+      level = "1 vs 0",
+      estimate = out$estimate,
+      se = if (!is.null(out$se)) out$se else NA_real_,
+      ci_lower = if (!is.null(out$ci_lower)) out$ci_lower else NA_real_,
+      ci_upper = if (!is.null(out$ci_upper)) out$ci_upper else NA_real_,
+      p.value = if (!is.null(out$p.value)) out$p.value else NA_real_,
+      stringsAsFactors = FALSE
+    )
+  } else if (out$var_type == "continuous" && !is.null(out$contrasts)) {
+    df_c <- out$contrasts
+    for (k in seq_len(nrow(df_c))) {
+      rows[[length(rows) + 1]] <- data.frame(
+        variable = out$variable,
+        type = out$var_type,
+        estimand = "contrast",
+        level = df_c$contrast[k],
+        estimate = df_c$estimate[k],
+        se = if ("se" %in% names(df_c)) df_c$se[k] else NA_real_,
+        ci_lower = if ("ci_lower" %in% names(df_c)) df_c$ci_lower[k] else NA_real_,
+        ci_upper = if ("ci_upper" %in% names(df_c)) df_c$ci_upper[k] else NA_real_,
+        p.value = if ("p.value" %in% names(df_c)) df_c$p.value[k] else NA_real_,
+        stringsAsFactors = FALSE
+      )
+    }
+  } else if (out$var_type == "categorical" && !is.null(out$contrasts)) {
+    df_c <- out$contrasts
+    for (k in seq_len(nrow(df_c))) {
+      rows[[length(rows) + 1]] <- data.frame(
+        variable = out$variable,
+        type = out$var_type,
+        estimand = "contrast",
+        level = df_c$contrast[k],
+        estimate = df_c$estimate[k],
+        se = if ("se" %in% names(df_c)) df_c$se[k] else NA_real_,
+        ci_lower = if ("ci_lower" %in% names(df_c)) df_c$ci_lower[k] else NA_real_,
+        ci_upper = if ("ci_upper" %in% names(df_c)) df_c$ci_upper[k] else NA_real_,
+        p.value = if ("p.value" %in% names(df_c)) df_c$p.value[k] else NA_real_,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+
+  if (length(rows) == 0) return(data.frame())
+  do.call(rbind, rows)
+}
+
+
+# ============================================================
 # Legacy wrappers (interaction.R calls these)
 # ============================================================
 
@@ -831,9 +1142,31 @@ print.infForest_effect <- function(x, ...) {
   cat("  Type:       ", x$var_type, "\n")
 
   pct <- round((1 - (if (!is.null(x$alpha)) x$alpha else 0.05)) * 100)
+  show_p <- isTRUE(x$show_p)
+
+  .fmt_p <- function(p) {
+    if (is.na(p)) return("NA")
+    if (p < 0.001) return(sprintf("%.2e", p))
+    sprintf("%.4f", p)
+  }
 
   if (x$var_type == "binary") {
-    cat(sprintf("  Estimate:    %.4f\n", x$estimate))
+    # Marginal means (if requested)
+    if (!is.null(x$marginal_means)) {
+      z_crit <- qnorm(1 - (if (!is.null(x$alpha)) x$alpha else 0.05) / 2)
+      cat("\n  Adjusted means:\n")
+      mm <- x$marginal_means
+      for (i in seq_len(nrow(mm))) {
+        lo <- mm$mean[i] - z_crit * mm$se[i]
+        hi <- mm$mean[i] + z_crit * mm$se[i]
+        cat(sprintf("    %s = %s:  %.4f  SE = %.4f  %d%% CI [%.4f, %.4f]\n",
+                    x$variable, mm$level[i], mm$mean[i], mm$se[i], pct, lo, hi))
+      }
+      cat("\n")
+    }
+
+    cat(sprintf("  Contrast:\n"))
+    cat(sprintf("    1 vs 0:      %.4f\n", x$estimate))
     if (!is.null(x$se_sandwich)) {
       cat(sprintf("  SE (sandwich): %.4f  |  %d%% CI: [%.4f, %.4f]\n",
                   x$se_sandwich, pct, x$ci_lower_sandwich, x$ci_upper_sandwich))
@@ -844,7 +1177,27 @@ print.infForest_effect <- function(x, ...) {
     }
     if (!is.null(x$rho_V))
       cat(sprintf("  rho_V:         %.2f\n", x$rho_V))
+    if (show_p && !is.null(x$p.value))
+      cat(sprintf("  p-value:       %s\n", .fmt_p(x$p.value)))
   } else {
+    # Marginal means (if requested) for continuous/categorical
+    if (!is.null(x$marginal_means)) {
+      z_crit <- qnorm(1 - (if (!is.null(x$alpha)) x$alpha else 0.05) / 2)
+      cat("\n  Adjusted means:\n")
+      mm <- x$marginal_means
+      for (i in seq_len(nrow(mm))) {
+        lo <- mm$mean[i] - z_crit * mm$se[i]
+        hi <- mm$mean[i] + z_crit * mm$se[i]
+        lbl <- if ("value" %in% names(mm)) {
+          sprintf("%s = %.3f (%s)", x$variable, mm$value[i], mm$level[i])
+        } else {
+          sprintf("%s = %s", x$variable, mm$level[i])
+        }
+        cat(sprintf("    %-25s  %.4f  SE = %.4f  %d%% CI [%.4f, %.4f]\n",
+                    lbl, mm$mean[i], mm$se[i], pct, lo, hi))
+      }
+    }
+
     if (x$var_type == "continuous") {
       cat("  Intervals:  ", x$n_intervals, "\n\n")
       cat("  Contrasts (per unit):\n")
@@ -865,6 +1218,8 @@ print.infForest_effect <- function(x, ...) {
       if ("se_pasr" %in% names(df) && !is.na(df$se_pasr[k]))
         cat(sprintf("      SE (PASR):     %.4f  |  %d%% CI: [%.4f, %.4f]\n",
                     df$se_pasr[k], pct, df$ci_lower_pasr[k], df$ci_upper_pasr[k]))
+      if (show_p && "p.value" %in% names(df) && !is.na(df$p.value[k]))
+        cat(sprintf("      p-value:       %s\n", .fmt_p(df$p.value[k])))
     }
     if (!is.null(x$rho_V))
       cat(sprintf("\n  rho_V: %.2f\n", x$rho_V))

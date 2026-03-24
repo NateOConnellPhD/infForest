@@ -5,16 +5,68 @@ precompute_forest_cache_cpp <- function(forest, X_obs, y_honest, honest_idx) {
     .Call(`_infForest_precompute_forest_cache_cpp`, forest, X_obs, y_honest, honest_idx)
 }
 
-aipw_scores_cached_cpp <- function(cache, ghat, var_col, is_binary, a, b, indicator_ = NULL) {
-    .Call(`_infForest_aipw_scores_cached_cpp`, cache, ghat, var_col, is_binary, a, b, indicator_)
+aipw_scores_cached_cpp <- function(cache, ghat, var_col, is_binary, a, b, indicator_ = NULL, n_threads = 1L) {
+    .Call(`_infForest_aipw_scores_cached_cpp`, cache, ghat, var_col, is_binary, a, b, indicator_, n_threads)
 }
 
 aipw_scores_multi_cpp <- function(cache, var_cols, is_binary_vec, a_vals, b_vals, ghat_list, indicator_list_ = NULL) {
     .Call(`_infForest_aipw_scores_multi_cpp`, cache, var_cols, is_binary_vec, a_vals, b_vals, ghat_list, indicator_list_)
 }
 
-aipw_curve_cached_cpp <- function(cache, ghat, var_col, grid_points, sigma2_override = -1.0) {
-    .Call(`_infForest_aipw_curve_cached_cpp`, cache, ghat, var_col, grid_points, sigma2_override)
+aipw_curve_cached_cpp <- function(cache, ghat, var_col, grid_points, sigma2_override = -1.0, n_threads = 1L) {
+    .Call(`_infForest_aipw_curve_cached_cpp`, cache, ghat, var_col, grid_points, sigma2_override, n_threads)
+}
+
+honest_predict_cached_cpp <- function(cache, X_query, n_threads = 1L) {
+    .Call(`_infForest_honest_predict_cached_cpp`, cache, X_query, n_threads)
+}
+
+pasr_extract_all_binary_cpp <- function(cache_list, ghat, var_col, code_to = 1.0, code_from = 0.0, indicator_ = NULL, n_threads = 1L) {
+    .Call(`_infForest_pasr_extract_all_binary_cpp`, cache_list, ghat, var_col, code_to, code_from, indicator_, n_threads)
+}
+
+pasr_extract_all_continuous_cpp <- function(cache_list, ghat, var_col, grid_points, a_val, b_val, n_threads = 1L) {
+    .Call(`_infForest_pasr_extract_all_continuous_cpp`, cache_list, ghat, var_col, grid_points, a_val, b_val, n_threads)
+}
+
+pasr_extract_all_marginal_cpp <- function(cache_list, Y_syn_list, X_cf_list, omega_mat, n_threads = 1L) {
+    .Call(`_infForest_pasr_extract_all_marginal_cpp`, cache_list, Y_syn_list, X_cf_list, omega_mat, n_threads)
+}
+
+pasr_extract_all_level_curve_cpp <- function(cache_list, Y_syn_list, ghat, x_var, var_col, grid_points, n_threads = 1L) {
+    .Call(`_infForest_pasr_extract_all_level_curve_cpp`, cache_list, Y_syn_list, ghat, x_var, var_col, grid_points, n_threads)
+}
+
+ranger_batch_predict_cpp <- function(forests_list, X_query, group_sizes_ = NULL, outcome_binary = FALSE, n_threads = 1L) {
+    .Call(`_infForest_ranger_batch_predict_cpp`, forests_list, X_query, group_sizes_, outcome_binary, n_threads)
+}
+
+preextract_ranger_forests_cpp <- function(forests_list, outcome_binary = FALSE) {
+    .Call(`_infForest_preextract_ranger_forests_cpp`, forests_list, outcome_binary)
+}
+
+ranger_predict_from_cache_cpp <- function(cache, X_query, group_sizes_ = NULL, n_threads = 1L) {
+    .Call(`_infForest_ranger_predict_from_cache_cpp`, cache, X_query, group_sizes_, n_threads)
+}
+
+flatten_ranger_forest_cpp <- function(rf, outcome_binary = FALSE) {
+    .Call(`_infForest_flatten_ranger_forest_cpp`, rf, outcome_binary)
+}
+
+predict_flat_forest_cpp <- function(flat_cache, X_query, n_threads = 1L) {
+    .Call(`_infForest_predict_flat_forest_cpp`, flat_cache, X_query, n_threads)
+}
+
+batch_predict_flat_forests_cpp <- function(flat_caches, X_query, group_sizes_ = NULL, n_threads = 1L) {
+    .Call(`_infForest_batch_predict_flat_forests_cpp`, flat_caches, X_query, group_sizes_, n_threads)
+}
+
+predict_flat_forest_all_cpp <- function(flat_cache, X_query, n_threads = 1L) {
+    .Call(`_infForest_predict_flat_forest_all_cpp`, flat_cache, X_query, n_threads)
+}
+
+compute_design_point_variance_cpp <- function(forest, X_query, train_leaf_ids, inbag, f_hat_train, outcome_binary, n_threads) {
+    .Call(`_infForest_compute_design_point_variance_cpp`, forest, X_query, train_leaf_ids, inbag, f_hat_train, outcome_binary, n_threads)
 }
 
 honest_predict_cpp <- function(forest, X_query, X_honest, y_honest, honest_idx) {
@@ -39,6 +91,14 @@ aipw_curve_v2_cpp <- function(forest, X_obs, y_honest, honest_idx, ghat, var_col
 
 aipw_curve_cpp <- function(forest, X_obs, X_grid_list, y_honest, honest_idx, ghat, var_col, grid_points, sigma2_override = -1.0) {
     .Call(`_infForest_aipw_curve_cpp`, forest, X_obs, X_grid_list, y_honest, honest_idx, ghat, var_col, grid_points, sigma2_override)
+}
+
+accumulate_curve_scores_cpp <- function(phi_grid_sum, phi_grid_cnt, fhat_grid, fhat_obs, honest_idx, x_var, ghat, Y, sigma2_ej) {
+    invisible(.Call(`_infForest_accumulate_curve_scores_cpp`, phi_grid_sum, phi_grid_cnt, fhat_grid, fhat_obs, honest_idx, x_var, ghat, Y, sigma2_ej))
+}
+
+accumulate_binary_scores_cpp <- function(fa_sum, fb_sum, fo_sum, f_cnt, fhat_a, fhat_b, fhat_obs, honest_idx) {
+    invisible(.Call(`_infForest_accumulate_binary_scores_cpp`, fa_sum, fb_sum, fo_sum, f_cnt, fhat_a, fhat_b, fhat_obs, honest_idx))
 }
 
 debug_compare_scorers <- function(cache, forest, X_obs, y_honest, honest_idx, ghat, var_col, val_a, val_b, check_tree) {

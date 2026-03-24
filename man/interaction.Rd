@@ -21,6 +21,7 @@ interaction(object, ...)
   variance = c("sandwich", "pasr", "both"),
   ci = TRUE,
   alpha = 0.05,
+  p.value = FALSE,
   R_min = 20L,
   R_max = 200L,
   batch_size = 10L,

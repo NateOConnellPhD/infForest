@@ -388,6 +388,7 @@ List aipw_scores_v2_cpp(
     }
 
     NumericVector phi(n_hon);
+    NumericVector fhat_a_out(n_hon), fhat_b_out(n_hon), fhat_obs_out(n_hon);
     double psi_sum = 0.0; int psi_cnt = 0;
     double sigma2_ej = 0.0;
     if (!is_binary) {
@@ -401,6 +402,7 @@ List aipw_scores_v2_cpp(
         double fa = (fhat_a_cnt[i]>0) ? fhat_a_sum[i]/fhat_a_cnt[i] : NA_REAL;
         double fb = (fhat_b_cnt[i]>0) ? fhat_b_sum[i]/fhat_b_cnt[i] : NA_REAL;
         double fo = (fhat_obs_cnt[i]>0) ? fhat_obs_sum[i]/fhat_obs_cnt[i] : NA_REAL;
+        fhat_a_out[j] = fa; fhat_b_out[j] = fb; fhat_obs_out[j] = fo;
         if (ISNA(fa)||ISNA(fb)||ISNA(fo)) { phi[j]=NA_REAL; continue; }
         double pc = fa - fb, res = y_ptr[i] - fo;
         double xj = has_indicator ? ind_ptr[i] : Xobs_ptr[i+n*var_col]; double gi = g_ptr[i], w, co;
@@ -412,7 +414,9 @@ List aipw_scores_v2_cpp(
     return List::create(Named("psi")=psi, Named("phi")=phi,
         Named("mean_pred_contrast")=(psi_cnt>0)?sum_pc/psi_cnt:NA_REAL,
         Named("mean_correction")=(psi_cnt>0)?sum_co/psi_cnt:NA_REAL,
-        Named("n_contributing")=psi_cnt, Named("n_split_trees")=n_split_trees, Named("n_trees")=B);
+        Named("n_contributing")=psi_cnt, Named("n_split_trees")=n_split_trees, Named("n_trees")=B,
+        Named("fhat_a")=fhat_a_out, Named("fhat_b")=fhat_b_out, Named("fhat_obs")=fhat_obs_out,
+        Named("sigma2_ej")=sigma2_ej);
 }
 
 
@@ -518,6 +522,20 @@ List aipw_curve_v2_cpp(
     }
 
     NumericVector slopes(G), pred_slopes(G);
+    NumericMatrix phi_scores(n_hon, G);
+    std::fill(phi_scores.begin(), phi_scores.end(), NA_REAL);
+
+    // Build fhat_grid (n_hon x G+1) and fhat_obs (n_hon) for R
+    NumericMatrix fhat_grid(n_hon, G_plus_1);
+    NumericVector fhat_obs(n_hon);
+    for (int j = 0; j < n_hon; j++) {
+        int i = honest_idx[j] - 1;
+        fhat_obs[j] = (fhat_obs_cnt[i] > 0) ? fhat_obs_sum[i] / fhat_obs_cnt[i] : NA_REAL;
+        for (int g = 0; g < G_plus_1; g++) {
+            fhat_grid(j, g) = (fhat_grid_cnt[g][i] > 0) ? fhat_grid_sum[g][i] / fhat_grid_cnt[g][i] : NA_REAL;
+        }
+    }
+
     for (int g = 0; g < G; g++) {
         double dg = grid_points[g+1] - grid_points[g];
         double phi_sum = 0.0, pred_sum = 0.0; int cnt = 0;
@@ -530,6 +548,7 @@ List aipw_curve_v2_cpp(
             double pc = fh - fl, res = y_ptr[i] - fo;
             double ej = Xobs_ptr[i+n*var_col] - g_ptr[i];
             double pg = pc + (ej/sigma2_ej)*res*dg;
+            phi_scores(j, g) = pg / dg;  // per-unit phi score
             phi_sum += pg; pred_sum += pc; cnt++;
         }
         slopes[g] = (cnt>0) ? (phi_sum/cnt)/dg : NA_REAL;
@@ -546,7 +565,9 @@ List aipw_curve_v2_cpp(
         Named("slopes")=slopes, Named("pred_slopes")=pred_slopes,
         Named("curve")=curve, Named("grid")=grid_points,
         Named("sigma2_ej")=sigma2_ej, Named("n_hon")=n_hon,
-        Named("n_split_trees")=n_split_trees, Named("n_trees")=B);
+        Named("n_split_trees")=n_split_trees, Named("n_trees")=B,
+        Named("phi_scores")=phi_scores,
+        Named("fhat_grid")=fhat_grid, Named("fhat_obs")=fhat_obs);
 }
 
 
@@ -559,4 +580,66 @@ List aipw_curve_cpp(
 ) {
     return aipw_curve_v2_cpp(forest, X_obs, y_honest, honest_idx,
                               ghat, var_col, grid_points, sigma2_override);
+}
+
+
+// ============================================================
+// accumulate_adjusted_mean_cpp — fast accumulation for effect_curve
+// Takes fhat_grid (n_hon x G+1), fhat_obs (n_hon), honest_idx,
+// x_var, ghat, Y, sigma2_ej, and accumulates into per-obs matrices.
+// Called once per honesty-split direction from R.
+// ============================================================
+
+// [[Rcpp::export]]
+void accumulate_curve_scores_cpp(
+    NumericMatrix phi_grid_sum, IntegerMatrix phi_grid_cnt,
+    NumericMatrix fhat_grid, NumericVector fhat_obs,
+    IntegerVector honest_idx, NumericVector x_var,
+    NumericVector ghat, NumericVector Y, double sigma2_ej
+) {
+    int n_hon = honest_idx.size();
+    int G_plus_1 = fhat_grid.ncol();
+
+    for (int j = 0; j < n_hon; j++) {
+        int k = honest_idx[j] - 1;  // 0-based
+        double fo = fhat_obs[j];
+        if (ISNA(fo)) continue;
+
+        double omega = (x_var[k] - ghat[k]) / sigma2_ej;
+        double R = Y[k] - fo;
+        double correction = omega * R;
+
+        for (int g = 0; g < G_plus_1; g++) {
+            double fg = fhat_grid(j, g);
+            if (!ISNA(fg)) {
+                // Accumulate complete phi score: fhat_grid + correction
+                phi_grid_sum(k, g) += fg + correction;
+                phi_grid_cnt(k, g)++;
+            }
+        }
+    }
+}
+
+
+// ============================================================
+// accumulate_binary_means_cpp — fast accumulation for binary adjusted means
+// ============================================================
+
+// [[Rcpp::export]]
+void accumulate_binary_scores_cpp(
+    NumericVector fa_sum, NumericVector fb_sum, NumericVector fo_sum,
+    IntegerVector f_cnt,
+    NumericVector fhat_a, NumericVector fhat_b, NumericVector fhat_obs,
+    IntegerVector honest_idx
+) {
+    int n_hon = honest_idx.size();
+    for (int j = 0; j < n_hon; j++) {
+        int k = honest_idx[j] - 1;
+        double fa = fhat_a[j], fb = fhat_b[j], fo = fhat_obs[j];
+        if (ISNA(fa) || ISNA(fb) || ISNA(fo)) continue;
+        fa_sum[k] += fa;
+        fb_sum[k] += fb;
+        fo_sum[k] += fo;
+        f_cnt[k]++;
+    }
 }

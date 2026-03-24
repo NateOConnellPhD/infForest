@@ -4,22 +4,26 @@
 \alias{ct_diagnose}
 \title{Diagnose Covariance Floor}
 \usage{
-ct_diagnose(object, newdata = NULL, R = 50L, B_mc = 500L, nuisance = NULL, ...)
+ct_diagnose(object, newdata = NULL, data = NULL, ...)
 }
 \arguments{
-\item{object}{An \code{infForest} object.}
+\item{object}{A fitted \code{ranger} object.}
 
 \item{newdata}{Data frame of prediction points. Default \code{NULL} uses
-the training data.}
+training data.}
 
-\item{R}{Number of synthetic replicates for PASR. Default 50.}
+\item{data}{Training data frame. Required because ranger does not store
+training data.}
 
-\item{B_mc}{Number of trees per paired forest. Default 500.}
+\item{...}{Additional arguments passed to \code{pasr_predict}.}
 
-\item{nuisance}{An \code{infForest_nuisance} object. If \code{NULL},
-estimated automatically.}
+\item{R_max}{Maximum PASR replicates. Default 150.}
 
-\item{...}{Additional arguments passed to \code{estimate_nuisance}.}
+\item{B_mc}{Trees per paired forest. Default 500.}
+
+\item{alpha}{Significance level. Default 0.05.}
+
+\item{verbose}{Print progress. Default FALSE.}
 }
 \value{
 An object of class \code{infForest_ct} containing:
@@ -33,21 +37,23 @@ An object of class \code{infForest_ct} containing:
 }
 }
 \description{
-Estimates the pointwise covariance floor C_T(x) across a set of prediction
-points using PASR. Returns summary statistics and supports visualization
-of where prediction uncertainty is highest across the covariate space.
+Estimates the pointwise covariance floor C_T(x) across prediction points
+using PASR. Returns summary statistics and supports visualization of where
+prediction uncertainty is highest across the covariate space.
 }
 \details{
 The covariance floor is the irreducible variance component of the forest
 prediction at each point — the variance that persists even with infinite
-trees. It reflects how the forest's weight structure concentrates on
-observations near x, and is a function of the local data density and
-covariate geometry.
+trees. It reflects structural dependence between trees induced by the
+forest design acting on the realized covariate configuration.
+
+This is a diagnostic for deployed ranger models. It can inform hyperparameter
+tuning: designs with lower median C_T achieve tighter prediction intervals.
 }
 \examples{
 \dontrun{
-fit <- infForest(y ~ ., data = dat, num.trees = 5000)
-ct <- ct_diagnose(fit)
+rf <- ranger(y ~ ., data = dat_train, num.trees = 5000)
+ct <- ct_diagnose(rf, data = dat_train)
 ct
 plot(ct)
 plot(ct, by = "x1")
