@@ -16,8 +16,6 @@ When both agree, the parametric assumptions are consistent with the data. When t
 
 **Confounding adjustment.** Effects are adjusted for all other variables in the model through the AIPW framework. The propensity model (estimated by ridge regression) corrects for confounding, analogous to including covariates in a regression model. The correction is doubly robust: the estimate is consistent if either the forest predictions or the propensity model is correctly specified.
 
-**Procedural estimand.** The estimates target the expected value of the estimate if we could repeatedly draw new outcome values (Y) from the same covariate population and apply the same procedure each time. The confidence interval covers this procedural target — the natural analogue of what regression targets.
-
 **No p-values by design.** The package focuses on effect sizes and precision. Every estimate comes with a standard error and confidence interval at a user-specified level (default 95%). P-values are available via `p.value = TRUE` but are not shown by default. The deliberate default reflects a focus on practical significance over null hypothesis testing.
 
 ### Conservative bias and model complexity
