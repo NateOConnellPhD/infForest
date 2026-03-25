@@ -51,7 +51,7 @@ interaction.infForest <- function(object, var, by,
                                   bw = 20L,
                                   q_lo = 0.10, q_hi = 0.90,
                                   subset = NULL,
-                                  variance = c("pasr", "sandwich", "both"),
+                                  variance = c("sandwich", "pasr", "both"),
                                   ci = TRUE, alpha = 0.05,
                                   p.value = FALSE,
                                   R_min = 20L, R_max = 200L,
@@ -110,7 +110,7 @@ int <- function(...) interaction(...)
 #' @keywords internal
 .interaction_by_binary <- function(object, var, by, at, type, bw, q_lo, q_hi,
                                    subset = NULL,
-                                   variance = "pasr", ci = TRUE, alpha = 0.05,
+                                   variance = "sandwich", ci = TRUE, alpha = 0.05,
                                    R_min = 20L, R_max = 200L,
                                    batch_size = 10L, tol = 0.05,
                                    n_stable = 2L, B_mc = 500L,
@@ -149,29 +149,10 @@ int <- function(...) interaction(...)
     stringsAsFactors = FALSE
   )
 
-  # Compute anchor description for printing
-  if (focal_type == "continuous") {
-    x_var <- object$X[[var]]
-    if (type == "quantile") {
-      at_vals <- quantile(x_var, probs = at, na.rm = TRUE)
-      at_desc <- paste0("Q", round(at * 100))
-    } else {
-      at_vals <- at
-      at_desc <- as.character(round(at, 2))
-    }
-    contrast_desc <- paste(at_desc[length(at_desc)], "-", at_desc[1])
-  } else {
-    at_vals <- NULL
-    at_desc <- NULL
-    contrast_desc <- NULL
-  }
-
   out <- list(
     variable = var, by = by,
     var_type = focal_type, by_type = "binary",
-    subgroups = subgroups, differences = differences,
-    at = at, type = type, at_vals = at_vals,
-    at_desc = at_desc, contrast_desc = contrast_desc
+    subgroups = subgroups, differences = differences
   )
 
   # --- CIs ---
@@ -221,8 +202,61 @@ int <- function(...) interaction(...)
       out$rho_V <- se_sand_diff^2 / se_pasr_diff^2
   }
 
+  out$df <- .build_interaction_df(out)
   class(out) <- "infForest_interaction"
   out
+}
+
+
+# ============================================================
+# Universal data frame builder for interaction objects
+# ============================================================
+#' @keywords internal
+.build_interaction_df <- function(out) {
+  rows <- list()
+  z_crit <- if (!is.null(out$alpha)) qnorm(1 - out$alpha / 2) else 1.96
+  var_label <- paste0(out$variable, ":", out$by)
+
+  # Subgroup effects
+  sg <- out$subgroups
+  for (i in seq_len(nrow(sg))) {
+    se_i <- if ("se" %in% names(sg)) sg$se[i] else NA_real_
+    rows[[length(rows) + 1]] <- data.frame(
+      variable = var_label,
+      type = paste0(out$var_type, " x ", out$by_type),
+      estimand = "subgroup",
+      level = sg$subgroup[i],
+      estimate = sg$estimate[i],
+      se = se_i,
+      ci_lower = if (!is.na(se_i)) sg$estimate[i] - z_crit * se_i else NA_real_,
+      ci_upper = if (!is.na(se_i)) sg$estimate[i] + z_crit * se_i else NA_real_,
+      p.value = NA_real_,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  # Differences
+  dd <- out$differences
+  for (i in seq_len(nrow(dd))) {
+    se_i <- if ("se" %in% names(dd)) dd$se[i] else NA_real_
+    ci_lo <- if ("ci_lower" %in% names(dd)) dd$ci_lower[i] else NA_real_
+    ci_hi <- if ("ci_upper" %in% names(dd)) dd$ci_upper[i] else NA_real_
+    rows[[length(rows) + 1]] <- data.frame(
+      variable = var_label,
+      type = paste0(out$var_type, " x ", out$by_type),
+      estimand = "interaction",
+      level = paste(dd$hi[i], "vs", dd$lo[i]),
+      estimate = dd$difference[i],
+      se = se_i,
+      ci_lower = ci_lo,
+      ci_upper = ci_hi,
+      p.value = if ("p.value" %in% names(dd)) dd$p.value[i] else NA_real_,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  if (length(rows) == 0) return(data.frame())
+  do.call(rbind, rows)
 }
 
 
@@ -289,23 +323,6 @@ int <- function(...) interaction(...)
     differences$difference[k] <- group_estimates[i_hi] - group_estimates[i_lo]
   }
 
-  # Compute anchor description for printing
-  if (focal_type == "continuous") {
-    x_var <- object$X[[var]]
-    if (type == "quantile") {
-      at_vals <- quantile(x_var, probs = at, na.rm = TRUE)
-      at_desc <- paste0("Q", round(at * 100))
-    } else {
-      at_vals <- at
-      at_desc <- as.character(round(at, 2))
-    }
-    contrast_desc <- paste(at_desc[length(at_desc)], "-", at_desc[1])
-  } else {
-    at_vals <- NULL
-    at_desc <- NULL
-    contrast_desc <- NULL
-  }
-
   out <- list(
     variable = var,
     by = by,
@@ -313,10 +330,9 @@ int <- function(...) interaction(...)
     by_type = "continuous",
     by_at = by_at,
     subgroups = subgroups,
-    differences = differences,
-    at = at, type = type, at_vals = at_vals,
-    at_desc = at_desc, contrast_desc = contrast_desc
+    differences = differences
   )
+  out$df <- .build_interaction_df(out)
   class(out) <- "infForest_interaction"
   out
 }
@@ -431,10 +447,7 @@ int <- function(...) interaction(...)
 print.infForest_interaction <- function(x, ...) {
   cat("Inference Forest Interaction\n")
   cat("  Variable:  ", x$variable, "\n")
-  cat("  By:        ", x$by, "(", x$by_type, ")\n")
-  if (x$var_type == "continuous" && !is.null(x$contrast_desc))
-    cat("  Support:   ", x$contrast_desc, "\n")
-  cat("\n")
+  cat("  By:        ", x$by, "(", x$by_type, ")\n\n")
 
   pct <- round((1 - (if (!is.null(x$alpha)) x$alpha else 0.05)) * 100)
   show_p <- isTRUE(x$show_p)
@@ -445,17 +458,11 @@ print.infForest_interaction <- function(x, ...) {
     sprintf("%.4f", p)
   }
 
-  sub_w <- max(nchar(x$subgroups$subgroup))
-  diff_hi_w <- max(nchar(x$differences$hi))
-  diff_lo_w <- max(nchar(x$differences$lo))
-
-  unit_label <- if (x$var_type == "continuous") "  (per unit)" else ""
-
   cat("  Subgroup effects:\n")
   for (k in seq_len(nrow(x$subgroups))) {
-    line <- sprintf("    %-*s  %8.4f%s",
-                    sub_w, x$subgroups$subgroup[k],
-                    x$subgroups$estimate[k], unit_label)
+    unit_label <- if (x$var_type == "continuous") "  (per unit)" else ""
+    line <- sprintf("    %-30s  %8.4f%s",
+                    x$subgroups$subgroup[k], x$subgroups$estimate[k], unit_label)
     if ("se" %in% names(x$subgroups) && !is.na(x$subgroups$se[k]))
       line <- paste0(line, sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])",
                                     x$subgroups$se[k], pct,
@@ -465,10 +472,8 @@ print.infForest_interaction <- function(x, ...) {
 
   cat("\n  Pairwise differences:\n")
   for (k in seq_len(nrow(x$differences))) {
-    line <- sprintf("    %-*s  vs  %-*s  %8.4f",
-                    diff_hi_w, x$differences$hi[k],
-                    diff_lo_w, x$differences$lo[k],
-                    x$differences$difference[k])
+    line <- sprintf("    %-20s vs %-20s  %8.4f",
+                    x$differences$hi[k], x$differences$lo[k], x$differences$difference[k])
     if ("se" %in% names(x$differences) && !is.na(x$differences$se[k]))
       line <- paste0(line, sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])",
                                     x$differences$se[k], pct,

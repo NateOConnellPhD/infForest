@@ -240,7 +240,6 @@ fit_bin <- infForest(y ~ ., data = dat_bin, num.trees = 5000,
 pasr(fit_cont, R = 100)
 pasr(fit_bin, R = 100)
 
-
 # --- 2.1 Split frequency and effect importance ---
 #
 # split_frequency() reports the fraction of trees splitting on each variable.
@@ -269,7 +268,6 @@ eimp(fit_cont, interactions = c("x2:trt", "x1:trt", "noise:trt"))
 
 
 # --- 2.2 Binary effects ---
-
 effect(fit_cont, "trt")
 effect(fit_cont, "trt", p.value = TRUE)
 effect(fit_cont, "trt", p.value = TRUE, marginals = TRUE)

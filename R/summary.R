@@ -40,7 +40,7 @@
 #' @export
 summary.infForest <- function(object, vars = NULL, type = "quantile",
                               bw = 20L, q_lo = 0.10, q_hi = 0.90,
-                              variance = c("pasr", "sandwich", "both"),
+                              variance = c("sandwich", "pasr", "both"),
                               ci = TRUE, alpha = 0.05, p.value = FALSE, ...) {
 
   check_infForest(object)
@@ -275,6 +275,18 @@ summary.infForest <- function(object, vars = NULL, type = "quantile",
     effects = results,
     n_terms = length(results)
   )
+
+  # Build combined $df from all effect and interaction results
+  df_list <- list()
+  for (nm in names(results)) {
+    r <- results[[nm]]
+    if (!is.null(r$df) && nrow(r$df) > 0) {
+      df_list[[length(df_list) + 1]] <- r$df
+    }
+  }
+  out$df <- if (length(df_list) > 0) do.call(rbind, df_list) else data.frame()
+  rownames(out$df) <- NULL
+
   class(out) <- "infForest_summary"
   out
 }
@@ -501,72 +513,58 @@ print.infForest_summary <- function(x, ...) {
   cat(paste(rep("-", 75), collapse = ""), "\n")
 
   pct <- round((1 - (if (!is.null(x$alpha)) x$alpha else 0.05)) * 100)
-  show_p <- isTRUE(x$show_p)
-
   .fmt_p <- function(p) {
-    if (is.na(p)) return("NA")
-    if (p < 0.001) return(sprintf("%.2e", p))
-    sprintf("%.4f", p)
+    if (is.na(p)) return("")
+    if (p < 0.001) sprintf("%.2e", p) else sprintf("%.4f", p)
   }
+
+  # Compute max variable name width
+  vw <- max(nchar(names(x$effects)), 4)
 
   for (nm in names(x$effects)) {
     eff <- x$effects[[nm]]
 
     if (inherits(eff, "infForest_interaction")) {
-      unit_label <- if (eff$var_type == "continuous") " (per unit)" else ""
-      support_str <- ""
-      if (eff$var_type == "continuous" && !is.null(eff$contrast_desc))
-        support_str <- paste0("  [", eff$contrast_desc, "]")
-      cat(sprintf("  %s  (effect of %s by %s)%s\n", nm, eff$variable, eff$by, support_str))
-
-      # Subgroup effects: "effect of x2 on y within trt = 1"
-      sub_w <- max(nchar(eff$subgroups$subgroup))
+      cat(sprintf("  %s  (interaction: %s by %s)\n", nm, eff$variable, eff$by))
       for (k in seq_len(nrow(eff$subgroups))) {
-        line <- sprintf("    %-*s:  %8.4f%s",
-                        sub_w, eff$subgroups$subgroup[k],
-                        eff$subgroups$estimate[k], unit_label)
-        if ("se" %in% names(eff$subgroups) && !is.na(eff$subgroups$se[k]))
-          line <- paste0(line, sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])",
-                                        eff$subgroups$se[k], pct,
-                                        eff$subgroups$ci_lower[k],
-                                        eff$subgroups$ci_upper[k]))
-        cat(line, "\n")
+        unit_label <- if (eff$var_type == "continuous") " (per unit)" else ""
+        se_txt <- if ("se" %in% names(eff$subgroups) && !is.na(eff$subgroups$se[k]))
+          sprintf("  (SE: %.4f)", eff$subgroups$se[k]) else ""
+        cat(sprintf("    %-30s  %.4f%s%s\n",
+                    eff$subgroups$subgroup[k], eff$subgroups$estimate[k], unit_label, se_txt))
       }
-
-      # Interaction difference with p-value
       for (k in seq_len(nrow(eff$differences))) {
-        diff_label <- paste(eff$differences$hi[k], "-", eff$differences$lo[k])
-        line <- sprintf("    Difference:  %8.4f", eff$differences$difference[k])
+        diff_lbl <- paste("Diff:", eff$differences$hi[k], "-", eff$differences$lo[k])
+        se_txt <- ""
         if ("se" %in% names(eff$differences) && !is.na(eff$differences$se[k]))
-          line <- paste0(line, sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])",
-                                        eff$differences$se[k], pct,
-                                        eff$differences$ci_lower[k],
-                                        eff$differences$ci_upper[k]))
-        if (show_p && "p.value" %in% names(eff$differences) && !is.na(eff$differences$p.value[k]))
-          line <- paste0(line, sprintf("  p: %s", .fmt_p(eff$differences$p.value[k])))
-        cat(line, "\n")
+          se_txt <- sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])",
+                            eff$differences$se[k], pct,
+                            eff$differences$ci_lower[k], eff$differences$ci_upper[k])
+        cat(sprintf("    %-30s  %.4f%s\n", diff_lbl, eff$differences$difference[k], se_txt))
       }
 
     } else if (inherits(eff, "infForest_effect")) {
       if (eff$var_type == "binary") {
-        line <- sprintf("  %-15s  binary      %8.4f", nm, eff$estimate)
-        if (!is.null(eff$se))
-          line <- paste0(line, sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])",
-                                        eff$se, pct, eff$ci_lower, eff$ci_upper))
-        if (show_p && !is.null(eff$p.value))
-          line <- paste0(line, sprintf("  p: %s", .fmt_p(eff$p.value)))
-        cat(line, "\n")
+        se_txt <- if (!is.null(eff$se))
+          sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])", eff$se, pct, eff$ci_lower, eff$ci_upper) else ""
+        p_txt <- if (!is.null(eff$p.value) && !is.na(eff$p.value))
+          sprintf("  p: %s", .fmt_p(eff$p.value)) else ""
+        cat(sprintf("  %-*s  binary  %.4f%s%s\n", vw, nm, eff$estimate, se_txt, p_txt))
       } else {
         df <- eff$contrasts
         for (k in seq_len(nrow(df))) {
-          label <- if (k == 1) sprintf("%-15s", nm) else sprintf("%-15s", "")
-          line <- sprintf("  %s  %-16s  %8.4f  (per unit)", label, df$contrast[k], df$estimate[k])
-          if ("se" %in% names(df) && !is.na(df$se[k]))
-            line <- paste0(line, sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])",
-                                          df$se[k], pct, df$ci_lower[k], df$ci_upper[k]))
-          if (show_p && "p.value" %in% names(df) && !is.na(df$p.value[k]))
-            line <- paste0(line, sprintf("  p: %s", .fmt_p(df$p.value[k])))
-          cat(line, "\n")
+          vlabel <- if (k == 1) nm else ""
+          se_col <- if ("se" %in% names(df)) "se" else if ("se_sandwich" %in% names(df)) "se_sandwich" else NULL
+          se_txt <- ""
+          if (!is.null(se_col) && !is.na(df[[se_col]][k])) {
+            ci_lo <- if ("ci_lower" %in% names(df)) df$ci_lower[k] else df$ci_lower_sandwich[k]
+            ci_hi <- if ("ci_upper" %in% names(df)) df$ci_upper[k] else df$ci_upper_sandwich[k]
+            se_txt <- sprintf("  (SE: %.4f, %d%% CI: [%.4f, %.4f])", df[[se_col]][k], pct, ci_lo, ci_hi)
+          }
+          p_txt <- if ("p.value" %in% names(df) && !is.na(df$p.value[k]))
+            sprintf("  p: %s", .fmt_p(df$p.value[k])) else ""
+          cat(sprintf("  %-*s  %-12s  %.4f  (per unit)%s%s\n",
+                      vw, vlabel, df$contrast[k], df$estimate[k], se_txt, p_txt))
         }
       }
     }

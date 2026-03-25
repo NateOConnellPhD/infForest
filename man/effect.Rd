@@ -20,6 +20,7 @@ effect(object, ...)
   ci = TRUE,
   alpha = 0.05,
   p.value = FALSE,
+  marginals = FALSE,
   propensity_trees = 2000L,
   ghat = NULL,
   R_min = 20L,
