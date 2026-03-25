@@ -320,8 +320,7 @@ dev.off()
 # --- 2.5 Categorical effects ---
 
 effect(fit_cont, "group", p.value = TRUE)
-effect(fit_cont, "group", at = c("A", "C"))
-
+effect(fit_cont, "group", at = c("C", "A"))
 
 # --- 2.6 Interactions ---
 
@@ -332,7 +331,7 @@ int(fit_cont, "x2", by = "trt", p.value = TRUE)
 
 summary(fit_cont, ~ trt + x2[.10, .90] + noise + group["A", "C"], p.value = TRUE)
 summary(fit_bin, ~ trt + x2 + noise, p.value = TRUE)
-summary(fit_cont, ~ trt + x2*trt)
+summary(fit_cont, ~ x2*trt, p.value = T)
 
 
 # --- 2.8 Variance estimation ---
