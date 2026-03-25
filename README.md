@@ -27,48 +27,6 @@ The finite-sample conservative bias (attenuation toward zero) arises from the fo
 
 Variable selection is built into the framework via the standardized splitting criterion stored during tree fitting. The `eimp()` function computes the average penalized impurity reduction for each variable across all nodes where it was a candidate. Variables above the noise floor (positive Δ̄_j) are signal; variables at or below zero are indistinguishable from noise and can be safely removed.
 
-### Effect importance
-
-`eimp()` returns the standardized criterion importance Δ̄_j — the average excess impurity reduction beyond the EVT-corrected noise floor, across all nodes where the variable was a splitting candidate. This is the nonparametric analogue of a partial F-statistic in regression. At each node, the forest evaluates every candidate variable's best split, subtracts the expected criterion under the null (scaled by the number of candidate cutpoints), and records the result — positive for variables that beat the noise floor, negative for those that don't. The average across all nodes gives Δ̄_j.
-
-```r
-fit <- infForest(y ~ ., data = dat, num.trees = 5000, penalize = TRUE, softmax = TRUE)
-eimp(fit)
-#> Effect Importance (50000 trees)
-#> Main effects:
-#>   x2     delta_bar =   4.8730  pi = 0.85  *
-#>   x1     delta_bar =   4.7874  pi = 1.00  *
-#>   group  delta_bar =   2.5277  pi = 0.80  *
-#>   trt    delta_bar =   1.8118  pi = 0.76  *
-#>   x4     delta_bar =  -4.0217  pi = 0.26
-#>   noise  delta_bar =  -6.6312  pi = 0.01
-#>
-#>   * = above noise floor (delta_bar > 0)
-#>   4 signal, 2 noise. Refit without: x4, noise
-```
-
-The `pi` column is the split frequency — the fraction of trees that split on each variable. Variables with Δ̄_j ≤ 0 can be removed and the model refitted. The AIPW inference in the refitted model preserves type I error because the sandwich variance recalibrates to the new estimator's variance — screening on Δ̄_j and refitting is a valid two-stage procedure.
-
-`split_frequency()` returns the split inclusion rates directly:
-
-```r
-split_frequency(fit)
-#> Split Frequency (50000 total trees)
-#>  variable n_trees   pct
-#>        x1   50000 100.0
-#>        x2   42325  84.7
-#>     group   40165  80.3
-#>       trt   38226  76.5
-#>        x4   13092  26.2
-#>     noise     451   0.9
-```
-
-For interactions, `eimp()` computes the attenuation factor λ — the fraction of interaction signal preserved when both variables don't always appear in the same tree. The variance inflation factor VIF = 1/λ² quantifies the efficiency loss:
-
-```r
-eimp(fit, interactions = c("x2:trt", "noise:trt"))
-```
-
 
 ## Installation
 
@@ -194,6 +152,70 @@ Two variance estimators are available for all effect estimates, controlled by th
 **Sandwich variance** (`variance = "sandwich"`) estimates the conditional variance given the observed covariates X — the variability from only redrawing Y while holding X fixed. This is analogous to the standard variance reported by `lm()` and most regression procedures.
 
 The difference between them is typically small (PASR/sandwich ≈ 0.97 in examples below), but the unconditional PASR variance is the technically correct target for inference about population-level effects. PASR is the default because the paired forests are already cached after calling `pasr()`, so both estimators are equally fast to compute. Use `variance = "both"` to see both side by side.
+
+### Effect importance
+
+`eimp()` returns the standardized criterion importance Δ̄_j — the average excess impurity reduction beyond the EVT-corrected noise floor, across all nodes where the variable was a splitting candidate. This is the nonparametric analogue of a partial F-statistic in regression. At each node, the forest evaluates every candidate variable's best split, subtracts the expected criterion under the null (scaled by the number of candidate cutpoints), and records the result — positive for variables that beat the noise floor, negative for those that don't. The average across all nodes gives Δ̄_j.
+
+```r
+fit <- infForest(y ~ ., data = dat, num.trees = 5000, penalize = TRUE, softmax = TRUE)
+eimp(fit)
+#> Effect Importance (50000 trees)
+#> Main effects:
+#>   x2     delta_bar =   4.8730  pi = 0.85  *
+#>   x1     delta_bar =   4.7874  pi = 1.00  *
+#>   group  delta_bar =   2.5277  pi = 0.80  *
+#>   trt    delta_bar =   1.8118  pi = 0.76  *
+#>   x4     delta_bar =  -4.0217  pi = 0.26
+#>   noise  delta_bar =  -6.6312  pi = 0.01
+#>
+#>   * = above noise floor (delta_bar > 0)
+#>   4 signal, 2 noise. Refit without: x4, noise
+```
+
+The `pi` column is the split frequency — the fraction of trees that split on each variable. Variables with Δ̄_j ≤ 0 can be removed and the model refitted. The AIPW inference in the refitted model preserves type I error because the sandwich variance recalibrates to the new estimator's variance — screening on Δ̄_j and refitting is a valid two-stage procedure.
+
+`split_frequency()` returns the split inclusion rates directly:
+
+```r
+split_frequency(fit)
+#> Split Frequency (50000 total trees)
+#>  variable n_trees   pct
+#>        x1   50000 100.0
+#>        x2   42325  84.7
+#>     group   40165  80.3
+#>       trt   38226  76.5
+#>        x4   13092  26.2
+#>     noise     451   0.9
+```
+
+For interactions, `eimp()` computes the attenuation factor λ — the fraction of interaction signal preserved when both variables don't always appear in the same tree. This test does not say a significant interaction exists, it tells you if sufficient information is in the forest to test it and pick it up if one does exist. The variance inflation factor VIF = 1/λ² quantifies the efficiency loss:
+
+```r
+eimp(fit, interactions = c("x2:trt", "noise:trt"))
+
+#> Effect Importance (50000 trees)
+#> 
+#> Main effects:
+#>   x2     delta_bar =   4.8730  pi = 0.85  *
+#>   x1     delta_bar =   4.7874  pi = 1.00  *
+#>   group  delta_bar =   2.5277  pi = 0.80  *
+#>   trt    delta_bar =   1.8118  pi = 0.76  *
+#>   x4     delta_bar =  -4.0217  pi = 0.26
+#>   noise  delta_bar =  -6.6312  pi = 0.01
+#> 
+#>   * = above noise floor (delta_bar > 0)
+#> 
+#>   4 signal, 2 noise. Refit without: x4, noise
+#> 
+#> Interactions:
+#>   x2:trt  lambda = 0.815  VIF = 1.5  (estimable)
+#>     pi_j = 0.847  pi_k = 0.764  pi_jk = 0.661
+#>   x1:trt  lambda = 0.896  VIF = 1.2  (estimable)
+#>     pi_j = 1.000  pi_k = 0.764  pi_jk = 0.764
+#>   noise:trt  lambda = 0.244  VIF = 16.7  (NOT estimable)
+#>     pi_j = 0.009  pi_k = 0.764  pi_jk = 0.009
+```
 
 ### Binary effects
 
