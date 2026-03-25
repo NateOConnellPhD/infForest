@@ -434,6 +434,8 @@ O'Connell, N.S. (2026). Random Forests as Statistical Procedures: Design, Varian
 
 O'Connell, N.S. (2026). Inference Forests: A General Framework for Nonparametric Inference. *In preparation*.
 
+O'Connell, N.S. (2026). Variance stability and screening validity for Inference Forests. *In preparation*.
+
 ## Citation
 
 ```bibtex
@@ -447,14 +449,12 @@ O'Connell, N.S. (2026). Inference Forests: A General Framework for Nonparametric
 @article{oconnell2026infforest,
   title={Inference Forests: A General Framework for Nonparametric Inference},
   author={O'Connell, Nathaniel S.},
-  journal={in preparation},
   year={2026}
 }
 
 @article{oconnell2026varStability,
   title={Variance stability and screening validity for Inference Forests},
   author={O'Connell, Nathaniel S.},
-  journal={in preparation},
   year={2026}
 }
 ```
