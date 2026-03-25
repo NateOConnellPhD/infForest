@@ -14,7 +14,7 @@ infForest(
   replace = FALSE,
   honesty.splits = 5L,
   penalize = TRUE,
-  softmax = FALSE,
+  softmax = TRUE,
   probability = NULL,
   num.threads = 1L,
   seed = NULL,
@@ -45,9 +45,9 @@ over. Default 5. Higher values reduce fold-assignment variance.}
 \code{TRUE}. Corrects balance and search advantages.}
 
 \item{softmax}{Logical; use softmax (proportional) variable selection?
-Default \code{FALSE}. When \code{TRUE}, variables are selected with
-probability proportional to their standardized criterion rather than
-by argmax. Requires \code{penalize = TRUE}.}
+Default \code{TRUE}. Variables are selected with probability proportional
+to their standardized criterion rather than by argmax. Requires
+\code{penalize = TRUE}.}
 
 \item{probability}{Logical; fit a probability forest for binary outcomes?
 Automatically set to \code{TRUE} when the response is a factor with 2

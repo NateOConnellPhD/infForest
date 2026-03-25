@@ -11,6 +11,11 @@
 #   Part 6 — The $df interface for programmatic access
 #   Part 7 — Binary outcomes
 #
+# Before running, rebuild the package:
+#   Rcpp::compileAttributes()
+#   roxygen2::roxygenize()
+#   devtools::load_all()
+#.  devtools::install()
 #
 # --- Parallelism ---
 #
@@ -52,14 +57,16 @@
 # Both layers are independent — you can use one, both, or neither.
 # ============================================================
 
+#Install inf.ranger
+#devtools::install_github("NateOConnellPhD/inf.ranger", force = TRUE, type = "source")
 
 library(inf.ranger)
 library(infForest)
 library(future)
 library(future.apply)
 
-plan(multisession, workers = 8)
-options(infForest.threads = 8)
+plan(multisession, workers = 14)
+options(infForest.threads = 14)
 options(future.globals.maxSize = 2 * 1024^3)
 
 # Figures directory for README plots
@@ -95,8 +102,7 @@ rf <- ranger(y ~ ., data = dat, num.trees = 5000, keep.inbag = TRUE)
 
 # Fit PASR once. x_conditional = FALSE enables unconditional variance,
 # which accounts for both outcome noise and covariate sampling variability.
-ps <- pasr_predict(rf, data = dat, x_conditional = FALSE, R = 80, verbose = TRUE)
-ps
+ps <- pasr_predict(rf, data = dat, R = 80, verbose = TRUE)
 
 # Predict at training X — instant, reuses stored forests
 pi_train <- predict(ps, newdata = dat[, c("x1","x2","x3")])
@@ -182,7 +188,14 @@ dev.off()
 # covariance floor (Ct, irreducible structural dependence).
 
 ct <- ct_diagnose(ps, data = dat)
+mean(ct$Ct)
 print(ct)
+png("man/figures/ct_diagnostic.png", width = 700, height = 500)
+plot(ct)
+dev.off()
+png("man/figures/ct_diagnostic_x1.png", width = 700, height = 500)
+plot(ct, by = "x1")
+dev.off()
 
 
 # ============================================================
@@ -228,7 +241,34 @@ pasr(fit_cont, R = 100)
 pasr(fit_bin, R = 100)
 
 
-# --- 2.1 Binary effects ---
+# --- 2.1 Split frequency and effect importance ---
+#
+# split_frequency() reports the fraction of trees splitting on each variable.
+# This is the inclusion rate pi_j — the probability a variable participates
+# in the forest's predictions.
+
+split_frequency(fit_cont)
+png("man/figures/split_frequency.png", width = 700, height = 500)
+plot(split_frequency(fit_cont))
+dev.off()
+
+# eimp() computes the standardized criterion importance delta_bar_j — the
+# average excess impurity reduction beyond the EVT-corrected noise floor.
+# Variables with delta_bar > 0 are signal; delta_bar <= 0 are noise.
+# This is the nonparametric analogue of the partial F-statistic.
+
+ei <- eimp(fit_cont)
+ei
+png("man/figures/eimp.png", width = 700, height = 500)
+plot(ei)
+dev.off()
+
+# Interaction estimability: lambda_int quantifies how much interaction
+# signal is lost due to partial splitting. VIF = 1/lambda^2.
+eimp(fit_cont, interactions = c("x2:trt", "x1:trt", "noise:trt"))
+
+
+# --- 2.2 Binary effects ---
 
 effect(fit_cont, "trt")
 effect(fit_cont, "trt", p.value = TRUE)
@@ -241,7 +281,7 @@ effect(fit_cont, "trt", variance = "both")
 effect(fit_bin, "trt", p.value = TRUE)
 
 
-# --- 2.2 Continuous effects ---
+# --- 2.3 Continuous effects ---
 
 effect(fit_cont, "x2", bw = 20)
 effect(fit_cont, "x2", at = c(0.10, 0.50, 0.90))
@@ -252,7 +292,7 @@ effect(fit_cont, "noise", p.value = TRUE)
 effect(fit_cont, "x4", p.value = TRUE)
 
 
-# --- 2.3 Effect curves ---
+# --- 2.4 Effect curves ---
 
 # Slope curve for x1 — should track 1.2*cos(1.5*x1)
 ec_slope <- effect_curve(fit_cont, "x1", q_lo = 0.02, q_hi = 0.98)
@@ -277,25 +317,25 @@ legend("topleft", c("infForest", "0.8 sin(1.5x)"), col = c("black","red"),
 dev.off()
 
 
-# --- 2.4 Categorical effects ---
+# --- 2.5 Categorical effects ---
 
 effect(fit_cont, "group", p.value = TRUE)
 effect(fit_cont, "group", at = c("A", "C"))
 
 
-# --- 2.5 Interactions ---
+# --- 2.6 Interactions ---
 
 int(fit_cont, "x2", by = "trt", p.value = TRUE)
 
 
-# --- 2.6 Summary ---
+# --- 2.7 Summary ---
 
 summary(fit_cont, ~ trt + x2[.10, .90] + noise + group["A", "C"], p.value = TRUE)
 summary(fit_bin, ~ trt + x2 + noise, p.value = TRUE)
 summary(fit_cont, ~ trt + x2*trt)
 
 
-# --- 2.7 Variance estimation ---
+# --- 2.8 Variance estimation ---
 
 effect(fit_cont, "trt", variance = "sandwich")
 effect(fit_cont, "trt", variance = "pasr")

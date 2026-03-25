@@ -18,9 +18,9 @@
 #' @param penalize Logical; use standardized splitting criterion? Default
 #'   \code{TRUE}. Corrects balance and search advantages.
 #' @param softmax Logical; use softmax (proportional) variable selection?
-#'   Default \code{FALSE}. When \code{TRUE}, variables are selected with
-#'   probability proportional to their standardized criterion rather than
-#'   by argmax. Requires \code{penalize = TRUE}.
+#'   Default \code{TRUE}. Variables are selected with probability proportional
+#'   to their standardized criterion rather than by argmax. Requires
+#'   \code{penalize = TRUE}.
 #' @param probability Logical; fit a probability forest for binary outcomes?
 #'   Automatically set to \code{TRUE} when the response is a factor with 2
 #'   levels.
@@ -63,7 +63,7 @@ infForest <- function(formula,
                       replace = FALSE,
                       honesty.splits = 5L,
                       penalize = TRUE,
-                      softmax = FALSE,
+                      softmax = TRUE,
                       probability = NULL,
                       num.threads = 1L,
                       seed = NULL,
@@ -172,7 +172,7 @@ infForest <- function(formula,
 
   if (use_parallel) {
     forests <- future.apply::future_lapply(seq_len(honesty.splits),
-                                            .fit_one_split, future.seed = TRUE)
+                                           .fit_one_split, future.seed = TRUE)
   } else {
     forests <- lapply(seq_len(honesty.splits), .fit_one_split)
   }

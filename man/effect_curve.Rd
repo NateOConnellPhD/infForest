@@ -13,7 +13,7 @@ effect_curve(object, ...)
   q_lo = 0.1,
   q_hi = 0.9,
   bw = 20L,
-  type = c("slope", "level"),
+  type = c("level", "slope"),
   alpha = 0.05,
   propensity_trees = 2000L,
   R = 50L,

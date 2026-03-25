@@ -58,5 +58,41 @@ split_frequency <- function(object) {
   )
   out <- out[order(-out$pct), ]
   rownames(out) <- NULL
+  class(out) <- c("infForest_split_freq", "data.frame")
+  attr(out, "n_trees_total") <- n_trees_total
   out
+}
+
+
+#' @method print infForest_split_freq
+#' @export
+print.infForest_split_freq <- function(x, ...) {
+  cat("Split Frequency (", attr(x, "n_trees_total"), " total trees)\n\n", sep = "")
+  print.data.frame(x, row.names = FALSE)
+  invisible(x)
+}
+
+
+#' @method plot infForest_split_freq
+#' @export
+plot.infForest_split_freq <- function(x, ...) {
+  # Order by pct ascending so highest is at top of horizontal barplot
+  x <- x[order(x$pct), ]
+  p <- nrow(x)
+
+  # Colors: gradient from light gray (low) to steelblue (high)
+  cols <- colorRampPalette(c("gray80", "steelblue"))(p)
+
+  par(mar = c(4, max(nchar(x$variable)) * 0.6 + 1, 2, 2))
+  bp <- barplot(x$pct, horiz = TRUE, names.arg = x$variable,
+                las = 1, col = cols, border = NA,
+                xlab = "Trees containing variable (%)",
+                main = "Split frequency", xlim = c(0, max(x$pct) * 1.15),
+                ...)
+
+  # Overlay percentages at end of each bar
+  text(x$pct + max(x$pct) * 0.02, bp, labels = paste0(x$pct, "%"),
+       adj = 0, cex = 0.8)
+
+  invisible(x)
 }

@@ -25,7 +25,49 @@ The finite-sample conservative bias (attenuation toward zero) arises from the fo
 - **Sample size.** More data → more leaves across a forest → less smoothing → less attenuation.
 - **Model complexity.** More predictors spread the forest's splitting budget, increasing effective smoothing per variable. Reducing irrelevant predictors concentrates the forest on important dimensions and reduces attenuation.
 
-Variable selection is an active area of development for this framework. Guidance on principled variable selection for inference forests is forthcoming. For now, reducing the predictor set to relevant variables will improve finite-sample performance.
+Variable selection is built into the framework via the standardized splitting criterion stored during tree fitting. The `eimp()` function computes the average penalized impurity reduction for each variable across all nodes where it was a candidate. Variables above the noise floor (positive Δ̄_j) are signal; variables at or below zero are indistinguishable from noise and can be safely removed.
+
+### Effect importance
+
+`eimp()` returns the standardized criterion importance Δ̄_j — the average excess impurity reduction beyond the EVT-corrected noise floor, across all nodes where the variable was a splitting candidate. This is the nonparametric analogue of a partial F-statistic in regression. At each node, the forest evaluates every candidate variable's best split, subtracts the expected criterion under the null (scaled by the number of candidate cutpoints), and records the result — positive for variables that beat the noise floor, negative for those that don't. The average across all nodes gives Δ̄_j.
+
+```r
+fit <- infForest(y ~ ., data = dat, num.trees = 5000, penalize = TRUE, softmax = TRUE)
+eimp(fit)
+#> Effect Importance (50000 trees)
+#> Main effects:
+#>   x2     delta_bar =   4.8730  pi = 0.85  *
+#>   x1     delta_bar =   4.7874  pi = 1.00  *
+#>   group  delta_bar =   2.5277  pi = 0.80  *
+#>   trt    delta_bar =   1.8118  pi = 0.76  *
+#>   x4     delta_bar =  -4.0217  pi = 0.26
+#>   noise  delta_bar =  -6.6312  pi = 0.01
+#>
+#>   * = above noise floor (delta_bar > 0)
+#>   4 signal, 2 noise. Refit without: x4, noise
+```
+
+The `pi` column is the split frequency — the fraction of trees that split on each variable. Variables with Δ̄_j ≤ 0 can be removed and the model refitted. The AIPW inference in the refitted model preserves type I error because the sandwich variance recalibrates to the new estimator's variance — screening on Δ̄_j and refitting is a valid two-stage procedure.
+
+`split_frequency()` returns the split inclusion rates directly:
+
+```r
+split_frequency(fit)
+#> Split Frequency (50000 total trees)
+#>  variable n_trees   pct
+#>        x1   50000 100.0
+#>        x2   42325  84.7
+#>     group   40165  80.3
+#>       trt   38226  76.5
+#>        x4   13092  26.2
+#>     noise     451   0.9
+```
+
+For interactions, `eimp()` computes the attenuation factor λ — the fraction of interaction signal preserved when both variables don't always appear in the same tree. The variance inflation factor VIF = 1/λ² quantifies the efficiency loss:
+
+```r
+eimp(fit, interactions = c("x2:trt", "noise:trt"))
+```
 
 
 ## Installation
@@ -40,7 +82,7 @@ devtools::install_github("NateOConnellPhD/infForest")
 
 infForest uses [ranger](https://github.com/imbs-hl/ranger) as its forest engine. The `inf.ranger` package is a minimal fork of ranger with two targeted modifications to the split selection code — the tree-growing algorithm, prediction machinery, and all other ranger internals are unchanged.
 
-**`penalize.split.competition`** — At each node, standard CART selects the variable with the largest impurity reduction. But continuous variables have an inherit advantage in that they evaluate many more candidate split points than binary variables. It's effectively a multiple comparison problem within split selection. This gives them a structural advantage over binary variables, even when the true signal is equal. Further, continuous variables have the advantage of giving their split perfect balance (e.g. splitting a the median), exacerbating their advantage. The standardized criterion subtracts the expected search advantage from each variable's best split score, producing a level comparison across variable types. The correction is closed-form and adds negligible computation.
+**`penalize.split.competition`** — At each node, standard CART selects the variable with the largest impurity reduction. But continuous variables have an inherent advantage in that they evaluate many more candidate split points than binary variables. It's effectively a multiple comparison problem within split selection. This gives them a structural advantage over binary variables, even when the true signal is equal. Further, continuous variables have the advantage of giving their split perfect balance (e.g. splitting at the median), exacerbating their advantage. The standardized criterion subtracts the expected search advantage from each variable's best split score, producing a level comparison across variable types. The correction is closed-form and adds negligible computation. When enabled, the penalized criterion values are stored for each variable across all nodes and trees, enabling the `eimp()` diagnostic in infForest.
 
 **`softmax.split`** — Standard CART selects the single best variable at each node (argmax). Softmax replaces this with probabilistic selection: variables are chosen with probability proportional to their penalized criterion scores. This increases the inclusion rate for variables with moderate but real signal. 
 
@@ -332,7 +374,7 @@ ggplot(s$df, aes(x = variable, y = estimate)) +
 | `num.trees` | 5000 | More trees → lower MC variance. 5000 recommended for inference. |
 | `honesty.splits` | 5 | Independent fold assignments averaged. At large n (>2000), 2-3 is sufficient. |
 | `penalize` | TRUE | Corrects variable selection bias. Always use for inference. |
-| `softmax` | FALSE | Proportional variable selection. Set TRUE for weak signals. |
+| `softmax` | TRUE | Proportional variable selection. Ensures all variables with signal receive positive split probability. |
 | `min.node.size` | 10 | Controls resolution. Smaller → finer conditioning, more variance per leaf. |
 | `replace` | FALSE | Sampling without replacement maximizes effective sample size per fold. |
 | `bw` | 20 | Grid bandwidth for continuous effects. Larger → faster, coarser. |
@@ -355,11 +397,13 @@ Implemented in `inf.ranger`. The standardized criterion corrects variable select
 ### PASR variance estimation
 The covariance floor captures irreducible dependence between trees sharing training data. PASR estimates it by generating synthetic outcomes from a fitted nuisance model, refitting paired forests on each synthetic dataset with shared fold assignments, and computing the cross-covariance. PASR is the default variance estimator — it provides unconditional variance (over both Y and X randomness), while sandwich variance is conditional on the training X.
 
+### Variable selection via effect importance
+During tree fitting with `penalize.split.competition = TRUE`, each candidate variable's best split is evaluated against an EVT-corrected noise floor. The penalized criterion Δ̃_j = G_j - τ² · 2·log(2·M_j) subtracts the expected maximum of M_j null criterion values, where M_j is the number of candidate cutpoints for variable j. This is accumulated across all nodes and trees. The average Δ̄_j separates signal variables (positive) from noise (zero or negative). Removing noise variables and refitting concentrates the forest's splitting budget on signal dimensions, reducing finite-sample attenuation.
+
 
 ## Scope and limitations
 
 - **No time series or clustered data.** The framework assumes independent observations. Extensions are future work.
-- **Variable selection.** Principled methods for inference forests are under active development. Reducing the predictor set improves finite-sample performance.
 
 
 ## References
@@ -381,6 +425,14 @@ O'Connell, N.S. (2026). Inference Forests: A General Framework for Nonparametric
 @article{oconnell2026infforest,
   title={Inference Forests: A General Framework for Nonparametric Inference},
   author={O'Connell, Nathaniel S.},
+  journal={in preparation},
+  year={2026}
+}
+
+@article{oconnell2026varStability,
+  title={Variance stability and screening validity for Inference Forests},
+  author={O'Connell, Nathaniel S.},
+  journal={in preparation},
   year={2026}
 }
 ```
