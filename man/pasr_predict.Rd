@@ -8,7 +8,7 @@
 pasr_predict(
   object,
   data,
-  x_conditional = TRUE,
+  x_conditional = FALSE,
   R = 80L,
   B_mc = 500L,
   alpha = 0.05,
@@ -22,7 +22,7 @@ pasr_predict(
 pasr_predict(
   object,
   data,
-  x_conditional = TRUE,
+  x_conditional = FALSE,
   R = 80L,
   B_mc = 500L,
   alpha = 0.05,
@@ -49,10 +49,11 @@ pasr_predict(
 
 \item{data}{Training data frame (must include response column).}
 
-\item{x_conditional}{If TRUE (default), PASR conditional on training X.
-If FALSE, bootstrap-PASR for unconditional variance.}
+\item{x_conditional}{If TRUE, PASR conditional on training X.
+If FALSE (default), includes analytic design-point variance (term III) for
+unconditional inference at new covariate values.}
 
-\item{R}{Number of PASR replicates per sample. Default 80.}
+\item{R}{Number of PASR replicates. Default 80.}
 
 \item{B_mc}{Trees per PASR forest. Default 500.}
 
@@ -80,8 +81,6 @@ training data.}
 \item{tol}{Relative change tolerance for convergence. Default 0.05.}
 
 \item{n_stable}{Consecutive stable batches required. Default 2.}
-
-\item{boot}{Number of bootstrap samples (only when x_conditional = FALSE).}
 }
 \value{
 A data frame with columns: f_hat, se, ci_lower, ci_upper, mc_var,

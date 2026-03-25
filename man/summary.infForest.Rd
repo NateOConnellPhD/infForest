@@ -11,7 +11,7 @@
   bw = 20L,
   q_lo = 0.1,
   q_hi = 0.9,
-  variance = c("sandwich", "pasr", "both"),
+  variance = c("pasr", "sandwich", "both"),
   ci = TRUE,
   alpha = 0.05,
   p.value = FALSE,

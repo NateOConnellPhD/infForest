@@ -6,10 +6,10 @@
 #'
 #' @param object A fitted \code{ranger} object.
 #' @param data Training data frame (must include response column).
-#' @param x_conditional If TRUE (default), PASR conditional on training X.
-#'   If FALSE, bootstrap-PASR for unconditional variance.
-#' @param boot Number of bootstrap samples (only when x_conditional = FALSE).
-#' @param R Number of PASR replicates per sample. Default 80.
+#' @param x_conditional If TRUE, PASR conditional on training X.
+#'   If FALSE (default), includes analytic design-point variance (term III) for
+#'   unconditional inference at new covariate values.
+#' @param R Number of PASR replicates. Default 80.
 #' @param B_mc Trees per PASR forest. Default 500.
 #' @param alpha Significance level. Default 0.05.
 #' @param verbose Print progress. Default FALSE.
@@ -18,10 +18,10 @@
 #' @return A \code{pasr_ranger} object. Use \code{predict()} for intervals.
 #'
 #' @export
-pasr_predict <- function(object, data, x_conditional = TRUE,
-                          R = 80L, B_mc = 500L, alpha = 0.05,
-                          B_loc = 1000L, B_scale = 1500L, R_cf = 5L,
-                          verbose = FALSE, ...) {
+pasr_predict <- function(object, data, x_conditional = FALSE,
+                         R = 80L, B_mc = 500L, alpha = 0.05,
+                         B_loc = 1000L, B_scale = 1500L, R_cf = 5L,
+                         verbose = FALSE, ...) {
   if (!inherits(object, "ranger"))
     stop("pasr_predict() requires a fitted ranger object. For infForest, use predict().")
 
@@ -61,9 +61,9 @@ pasr_predict <- function(object, data, x_conditional = TRUE,
       .fit_mean_pred <- function(idx_tr, idx_te, seed) {
         dat_tr <- X_loc[idx_tr, , drop = FALSE]; dat_tr$y <- Y_loc[idx_tr]
         rf <- inf.ranger::ranger(y ~ ., data = dat_tr, num.trees = B_loc,
-                                  mtry = p_loc, min.node.size = 1,
-                                  sample.fraction = 1.0, replace = FALSE,
-                                  seed = seed, num.threads = 1L)
+                                 mtry = p_loc, min.node.size = 1,
+                                 sample.fraction = 1.0, replace = FALSE,
+                                 seed = seed, num.threads = 1L)
         as.numeric(predict(rf, data = X_loc[idx_te, , drop = FALSE])$predictions)
       }
       m1_sum <- numeric(n_loc); m1_cnt <- integer(n_loc)
@@ -84,9 +84,9 @@ pasr_predict <- function(object, data, x_conditional = TRUE,
 
       dat_scale <- X_loc; dat_scale$sprod <- sprod
       rf_scale <- inf.ranger::ranger(sprod ~ ., data = dat_scale, num.trees = B_scale,
-                                      mtry = p_loc, min.node.size = object$min.node.size,
-                                      sample.fraction = 1.0, replace = TRUE,
-                                      num.threads = 1L)
+                                     mtry = p_loc, min.node.size = object$min.node.size,
+                                     sample.fraction = 1.0, replace = TRUE,
+                                     num.threads = 1L)
       mhat_loc <- (mhat1 + mhat2) / 2
       sigma_hat_loc <- sqrt(pmax(as.numeric(
         predict(rf_scale, data = X_loc)$predictions), 1e-8))
@@ -103,10 +103,10 @@ pasr_predict <- function(object, data, x_conditional = TRUE,
 
   # --- Fit paired forests for one sample, return stripped ---
   .make_pasr_fit_fn <- function(X_local, resp_name_local, vn_local,
-                                 outcome_type_local, mhat_local,
-                                 sigma_hat_train_local, pred_train_local,
-                                 n_local, B_mc_local,
-                                 mtry_local, min_node_local) {
+                                outcome_type_local, mhat_local,
+                                sigma_hat_train_local, pred_train_local,
+                                n_local, B_mc_local,
+                                mtry_local, min_node_local) {
     rf_args_base <- list(
       formula = as.formula(paste(resp_name_local, "~ .")),
       num.trees = B_mc_local, mtry = mtry_local,
@@ -148,9 +148,9 @@ pasr_predict <- function(object, data, x_conditional = TRUE,
 
     if (verbose) cat(sprintf("Fitting %d paired forests...\n", R))
     .fit_one <- .make_pasr_fit_fn(X, resp_name, vn, outcome_type,
-                                    nuis$mhat, nuis$sigma_hat_train,
-                                    nuis$pred_train, n, B_mc,
-                                    object$mtry, object$min.node.size)
+                                  nuis$mhat, nuis$sigma_hat_train,
+                                  nuis$pred_train, n, B_mc,
+                                  object$mtry, object$min.node.size)
 
     if (use_parallel) {
       paired_forests <- future.apply::future_lapply(
@@ -184,9 +184,9 @@ pasr_predict <- function(object, data, x_conditional = TRUE,
 
     if (verbose) cat(sprintf("Fitting %d paired forests...\n", R))
     .fit_one_cond <- .make_pasr_fit_fn(X, resp_name, vn, outcome_type,
-                                        nuis$mhat, nuis$sigma_hat_train,
-                                        nuis$pred_train, n, B_mc,
-                                        object$mtry, object$min.node.size)
+                                       nuis$mhat, nuis$sigma_hat_train,
+                                       nuis$pred_train, n, B_mc,
+                                       object$mtry, object$min.node.size)
 
     if (use_parallel) {
       paired_forests <- future.apply::future_lapply(
@@ -253,7 +253,7 @@ print.pasr_ranger <- function(x, ...) {
 
 #' @export
 predict.pasr_ranger <- function(object, newdata = NULL, alpha = NULL,
-                                 unconditional = NULL, ...) {
+                                unconditional = NULL, ...) {
   if (is.null(alpha)) alpha <- object$alpha
   # Default: unconditional if object was fit that way
   if (is.null(unconditional)) unconditional <- !object$x_conditional
@@ -377,8 +377,8 @@ predict.pasr_ranger <- function(object, newdata = NULL, alpha = NULL,
 #' @rdname pasr_predict
 #' @export
 predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
-                               alpha = 0.05, R = 50L,
-                               verbose = FALSE, propensities = NULL, ...) {
+                              alpha = 0.05, R = 50L,
+                              verbose = FALSE, propensities = NULL, ...) {
   check_infForest(object)
   pasr <- object$pasr
 
@@ -411,8 +411,8 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
 
   # Point estimates from observed data (pass propensities if available)
   mu_obs <- .infForest_predict_once(object, newdata, specified_vars,
-                                     margin_vars, is_complete, n, Y,
-                                     propensities = propensities)
+                                    margin_vars, is_complete, n, Y,
+                                    propensities = propensities)
 
   # Sigma2 for pointwise PI
   sigma2_hat <- NULL
@@ -433,7 +433,7 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
         is_bin <- (vtype == "binary")
         propensities[[vname]] <- list(
           ghat = .fit_propensity(object$X, vname, is_binary = is_bin,
-                                  n_trees = 2000L)$ghat,
+                                 n_trees = 2000L)$ghat,
           is_binary = is_bin,
           x_var = object$X[[vname]]
         )
@@ -442,7 +442,7 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
 
     # Precompute constants
     precomputed <- .precompute_predict_constants(object, newdata,
-                                                  specified_vars, propensities)
+                                                 specified_vars, propensities)
 
     nt <- .get_n_threads()
 
@@ -463,8 +463,8 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
       mu_matrix <- matrix(NA_real_, nrow = pasr$R, ncol = n_queries)
       for (r in seq_len(pasr$R)) {
         mu_matrix[r, ] <- .pasr_extract_predict(pasr, r, object, newdata,
-                                                  specified_vars, propensities,
-                                                  precomputed)
+                                                specified_vars, propensities,
+                                                precomputed)
       }
     }
     se <- apply(mu_matrix, 2, sd)
@@ -498,7 +498,7 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
         Y_syn <- fhat_full + rnorm(n, 0, sigma_hat_train)
       }
       mu_matrix[r, ] <- .infForest_predict_once(object, newdata, specified_vars,
-                                                  margin_vars, is_complete, n, Y_syn)
+                                                margin_vars, is_complete, n, Y_syn)
     }
     se <- apply(mu_matrix, 2, sd)
   }
@@ -545,11 +545,11 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
 # ============================================================
 #' @keywords internal
 .predict_ranger_pasr <- function(object, data, newdata = NULL,
-                                  R_min = 20L, R_max = 200L, batch_size = 10L,
-                                  tol = 0.05, n_stable = 2L,
-                                  B_mc = 500L, alpha = 0.05,
-                                  B_loc = 1000L, B_scale = 1500L, R_cf = 5L,
-                                  verbose = FALSE, ...) {
+                                 R_min = 20L, R_max = 200L, batch_size = 10L,
+                                 tol = 0.05, n_stable = 2L,
+                                 B_mc = 500L, alpha = 0.05,
+                                 B_loc = 1000L, B_scale = 1500L, R_cf = 5L,
+                                 verbose = FALSE, ...) {
 
   z_crit <- qnorm(1 - alpha / 2)
 
@@ -574,7 +574,7 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
 
   # Deployed forest predictions and MC variance
   pred_all <- .ranger_predict(object, data = newdata[, vn, drop = FALSE],
-                               predict.all = TRUE)$predictions
+                              predict.all = TRUE)$predictions
   if (outcome_type == "binary") pred_all <- pred_all[, 2, ]
 
   f_hat <- rowMeans(pred_all)
@@ -589,9 +589,9 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
     .fit_mean_pred <- function(idx_tr, idx_te, seed) {
       dat_tr <- X[idx_tr, , drop = FALSE]; dat_tr$y <- Y[idx_tr]
       rf <- inf.ranger::ranger(y ~ ., data = dat_tr, num.trees = B_loc,
-                                mtry = p, min.node.size = 1,
-                                sample.fraction = 1.0, replace = FALSE,
-                                seed = seed, num.threads = 1L)
+                               mtry = p, min.node.size = 1,
+                               sample.fraction = 1.0, replace = FALSE,
+                               seed = seed, num.threads = 1L)
       as.numeric(.ranger_predict(rf, data = X[idx_te, , drop = FALSE])$predictions)
     }
 
@@ -613,11 +613,11 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
 
     dat_scale <- X; dat_scale$sprod <- sprod
     rf_scale <- inf.ranger::ranger(sprod ~ ., data = dat_scale, num.trees = B_scale,
-                                    mtry = p, min.node.size = object$min.node.size,
-                                    sample.fraction = 1.0, replace = FALSE,
-                                    num.threads = 1L)
+                                   mtry = p, min.node.size = object$min.node.size,
+                                   sample.fraction = 1.0, replace = FALSE,
+                                   num.threads = 1L)
     sigma2_hat <- pmax(as.numeric(.ranger_predict(rf_scale,
-                        data = newdata[, vn, drop = FALSE])$predictions), 1e-8)
+                                                  data = newdata[, vn, drop = FALSE])$predictions), 1e-8)
     mhat <- (mhat1 + mhat2) / 2
     sigma_hat_train <- sqrt(pmax(as.numeric(
       .ranger_predict(rf_scale, data = X)$predictions), 1e-8))
@@ -651,9 +651,9 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
 
   # Factory for isolated closure (avoids shipping large objects to workers)
   .make_pasr_ranger_fn <- function(X_local, resp_name_local, vn_local,
-                                     newdata_local, rf_args_base_local,
-                                     outcome_type_local, mhat_local,
-                                     sigma_hat_train_local, pred_train_local, n_local) {
+                                   newdata_local, rf_args_base_local,
+                                   outcome_type_local, mhat_local,
+                                   sigma_hat_train_local, pred_train_local, n_local) {
     function(r) {
       set.seed(r * 7919L)
       if (outcome_type_local == "continuous") {
@@ -686,8 +686,8 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
 
     if (use_parallel) {
       batch_res <- future.apply::future_lapply(r_seq, .fit_one_ranger_pasr,
-                                                future.seed = TRUE,
-                                                future.packages = "inf.ranger")
+                                               future.seed = TRUE,
+                                               future.packages = "inf.ranger")
     } else {
       batch_res <- lapply(r_seq, .fit_one_ranger_pasr)
     }
@@ -741,157 +741,13 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
 
 
 # ============================================================
-# Unconditional PASR: bootstrap X, run PASR within each
-# Captures Var(f_hat) = E_X[Var(f_hat|X)] + Var_X[E(f_hat|X)]
-# ============================================================
-#' @keywords internal
-.predict_ranger_pasr_unconditional <- function(object, data, newdata = NULL,
-                                                R_min = 20L, R_max = 100L,
-                                                batch_size = 10L,
-                                                tol = 0.05, n_stable = 2L,
-                                                B_mc = 500L, alpha = 0.05,
-                                                B_loc = 1000L, B_scale = 1500L,
-                                                R_cf = 5L, boot = 20L,
-                                                verbose = FALSE, ...) {
-
-  z_crit <- qnorm(1 - alpha / 2)
-  resp_name <- setdiff(names(data), object$forest$independent.variable.names)
-  if (length(resp_name) != 1) stop("Cannot identify response column in data.")
-  vn <- object$forest$independent.variable.names
-  n <- nrow(data)
-
-  if (is.null(newdata)) newdata <- data[, vn, drop = FALSE]
-  nk <- nrow(newdata)
-
-  # Deployed forest prediction at query points (from original fit)
-  pred_all <- .ranger_predict(object, data = newdata[, vn, drop = FALSE],
-                               predict.all = TRUE)$predictions
-  Y_raw <- data[[resp_name]]
-  is_prob_forest <- !is.null(object$treetype) && object$treetype == "Probability estimation"
-  outcome_type <- if ((is.factor(Y_raw) && nlevels(Y_raw) == 2) || is_prob_forest) "binary" else "continuous"
-  if (outcome_type == "binary") pred_all <- pred_all[, 2, ]
-  f_hat <- rowMeans(pred_all)
-  if (outcome_type == "binary") f_hat <- pmin(pmax(f_hat, 1e-4), 1 - 1e-4)
-
-  has_future <- requireNamespace("future.apply", quietly = TRUE)
-  use_parallel <- has_future && !inherits(future::plan(), "sequential")
-
-  if (verbose) cat(sprintf("Unconditional PASR: %d bootstrap samples, R_max=%d each\n", boot, R_max))
-
-  # Factory for bootstrap-PASR replicate (isolated closure)
-  .make_boot_fn <- function(data_local, object_local, newdata_local, vn_local,
-                             resp_name_local, R_max_local, R_min_local,
-                             batch_size_local, tol_local, n_stable_local,
-                             B_mc_local, B_loc_local, B_scale_local,
-                             R_cf_local, alpha_local, n_local) {
-    function(b) {
-      set.seed(b * 31337L)
-      boot_idx <- sample.int(n_local, n_local, replace = TRUE)
-      data_boot <- data_local[boot_idx, , drop = FALSE]
-
-      Y_raw_b <- data_boot[[resp_name_local]]
-      is_prob <- is.factor(Y_raw_b) && nlevels(Y_raw_b) == 2
-      rf_args <- list(
-        formula = as.formula(paste(resp_name_local, "~ .")),
-        data = data_boot,
-        num.trees = object_local$num.trees,
-        mtry = object_local$mtry,
-        min.node.size = object_local$min.node.size,
-        num.threads = 1L
-      )
-      if (is_prob) rf_args$probability <- TRUE
-      rf_boot <- do.call(inf.ranger::ranger, rf_args)
-
-      result <- .predict_ranger_pasr(
-        rf_boot, data = data_boot, newdata = newdata_local,
-        R_min = R_min_local, R_max = R_max_local,
-        batch_size = batch_size_local, tol = tol_local,
-        n_stable = n_stable_local, B_mc = B_mc_local,
-        alpha = alpha_local, B_loc = B_loc_local,
-        B_scale = B_scale_local, R_cf = R_cf_local,
-        verbose = FALSE)
-
-      list(
-        f_hat_boot = result$f_hat,
-        ci_var_boot = result$mc_var + result$Ct_hat,
-        sigma2_boot = if ("sigma2_hat" %in% names(result)) result$sigma2_hat else NULL
-      )
-    }
-  }
-
-  .run_one_boot <- .make_boot_fn(
-    data, object, newdata, vn, resp_name,
-    R_max, R_min, batch_size, tol, n_stable,
-    B_mc, B_loc, B_scale, R_cf, alpha, n)
-
-  if (use_parallel) {
-    boot_results <- future.apply::future_lapply(
-      seq_len(boot), .run_one_boot,
-      future.seed = TRUE,
-      future.packages = "inf.ranger")
-  } else {
-    boot_results <- lapply(seq_len(boot), function(b) {
-      if (verbose && b %% 5 == 0) cat(sprintf("  Bootstrap %d/%d\n", b, boot))
-      .run_one_boot(b)
-    })
-  }
-
-  fhat_mat <- matrix(NA_real_, nk, boot)
-  civar_mat <- matrix(NA_real_, nk, boot)
-  sigma2_mat <- if (outcome_type == "continuous") matrix(NA_real_, nk, boot) else NULL
-
-  for (b in seq_len(boot)) {
-    fhat_mat[, b] <- boot_results[[b]]$f_hat_boot
-    civar_mat[, b] <- boot_results[[b]]$ci_var_boot
-    if (!is.null(sigma2_mat)) sigma2_mat[, b] <- boot_results[[b]]$sigma2_boot
-  }
-
-  # Law of total variance:
-  # E_X*[Var(f|X*)]: average conditional PASR variance across bootstraps
-  mean_cond_var <- rowMeans(civar_mat)
-  # Var_X*[f(x)]: variance of point estimates across bootstraps
-  var_fhat <- apply(fhat_mat, 1, var)
-  # Total unconditional CI variance
-  ci_var_uncond <- mean_cond_var + var_fhat
-  ci_se_uncond <- sqrt(ci_var_uncond)
-
-  out <- data.frame(
-    f_hat = f_hat,
-    se = ci_se_uncond,
-    ci_lower = f_hat - z_crit * ci_se_uncond,
-    ci_upper = f_hat + z_crit * ci_se_uncond,
-    var_conditional = mean_cond_var,
-    var_x = var_fhat,
-    boot_samples = boot
-  )
-
-  if (outcome_type == "continuous" && !is.null(sigma2_mat)) {
-    mean_sigma2 <- rowMeans(sigma2_mat)
-    pi_var <- mean_sigma2 + ci_var_uncond
-    pi_se <- sqrt(pi_var)
-    out$pi_lower <- f_hat - z_crit * pi_se
-    out$pi_upper <- f_hat + z_crit * pi_se
-    out$sigma2_hat <- mean_sigma2
-  }
-
-  if (verbose) {
-    cat(sprintf("  Unconditional PASR complete: %d bootstraps\n", boot))
-    cat(sprintf("  Median conditional var:  %.6f\n", median(mean_cond_var)))
-    cat(sprintf("  Median X-variance:       %.6f\n", median(var_fhat)))
-    cat(sprintf("  Median total var:        %.6f\n", median(ci_var_uncond)))
-  }
-
-  out
-}
-
-
-# ============================================================
+# Internal: infForest predict once
 # Internal: infForest predict once
 # ============================================================
 #' @keywords internal
 .infForest_predict_once <- function(object, newdata, specified_vars,
-                                     margin_vars, is_complete, n, Y,
-                                     propensities = NULL) {
+                                    margin_vars, is_complete, n, Y,
+                                    propensities = NULL) {
   n_queries <- nrow(newdata)
   if (is_complete) return(.predict_complete(object, newdata, n, Y))
 
@@ -903,7 +759,7 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
       is_bin <- (vtype == "binary")
       propensities[[vname]] <- list(
         ghat = .fit_propensity(object$X, vname, is_binary = is_bin,
-                                n_trees = 2000L)$ghat,
+                               n_trees = 2000L)$ghat,
         is_binary = is_bin,
         x_var = object$X[[vname]]
       )
@@ -1038,7 +894,7 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
         y_hon[dir$hon] <- as.numeric(Y[dir$hon])
         X_query <- reorder_X_to_ranger(newdata_num, dir$rf)
         preds <- honest_predict_cpp(dir$rf$forest, X_query, X_ord_hon,
-                                     y_hon, as.integer(dir$hon))
+                                    y_hon, as.integer(dir$hon))
         for (q in seq_len(n_queries)) {
           if (!is.na(preds[q])) { pred_sum[q] <- pred_sum[q] + preds[q]; pred_cnt[q] <- pred_cnt[q] + 1L }
         }
@@ -1054,7 +910,7 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
 
 #' @keywords internal
 .marginalized_predict_single <- function(object, query_vals, specified_vars, n, Y,
-                                          propensities) {
+                                         propensities) {
   phi_sum <- 0; phi_cnt <- 0L
 
   for (r in seq_along(object$forests)) {
@@ -1126,8 +982,8 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
   .fit_mean <- function(idx_tr, idx_te, seed) {
     dat_tr <- X[idx_tr,,drop=FALSE]; dat_tr$y <- Y[idx_tr]
     rf <- inf.ranger::ranger(y~., data=dat_tr, num.trees=1000L, mtry=p,
-                              min.node.size=1, sample.fraction=1.0, replace=FALSE,
-                              seed=seed, num.threads=1L)
+                             min.node.size=1, sample.fraction=1.0, replace=FALSE,
+                             seed=seed, num.threads=1L)
     as.numeric(.ranger_predict(rf, data=X[idx_te,,drop=FALSE])$predictions)
   }
   m1_sum <- numeric(n); m1_cnt <- integer(n)
@@ -1146,10 +1002,10 @@ predict.infForest <- function(object, newdata = NULL, pred_type = NULL,
   sprod <- (Y-mhat1)*(Y-mhat2)
   dat_scale <- X; dat_scale$sprod <- sprod
   rf_scale <- inf.ranger::ranger(sprod~., data=dat_scale, num.trees=1500L,
-                                  mtry=p, min.node.size=10L,
-                                  sample.fraction=1.0, replace=TRUE, num.threads=1L)
+                                 mtry=p, min.node.size=10L,
+                                 sample.fraction=1.0, replace=TRUE, num.threads=1L)
   pmax(as.numeric(.ranger_predict(rf_scale,
-    data=newdata[,colnames(X),drop=FALSE])$predictions), 1e-8)
+                                  data=newdata[,colnames(X),drop=FALSE])$predictions), 1e-8)
 }
 
 #' @keywords internal

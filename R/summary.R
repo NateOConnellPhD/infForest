@@ -40,7 +40,7 @@
 #' @export
 summary.infForest <- function(object, vars = NULL, type = "quantile",
                               bw = 20L, q_lo = 0.10, q_hi = 0.90,
-                              variance = c("sandwich", "pasr", "both"),
+                              variance = c("pasr", "sandwich", "both"),
                               ci = TRUE, alpha = 0.05, p.value = FALSE, ...) {
 
   check_infForest(object)

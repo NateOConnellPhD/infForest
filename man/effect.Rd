@@ -16,7 +16,7 @@ effect(object, ...)
   q_hi = 0.9,
   bw = 20L,
   subset = NULL,
-  variance = c("sandwich", "pasr", "both"),
+  variance = c("pasr", "sandwich", "both"),
   ci = TRUE,
   alpha = 0.05,
   p.value = FALSE,
