@@ -6,7 +6,9 @@
 
 ## What is this framework?
 
-This is a complement to regression, not a replacement. Regression answers the question: *what do these data say about parameter estimates given my imposed assumptions about the functional form?* Inference forests answer the question: *what do the data themselves say about the effects without any imposed restrictions?*
+This is an framework for non-parametric inference using Random Forests. 
+
+**How does this compare to regression.** This is a complement to regression, not a replacement. Regression answers the question: *what do these data say about parameter estimates given my imposed assumptions about the functional form?* Inference forests answer the question: *what do the data themselves say about the effects without any imposed restrictions?*
 
 As the saying goes, "All models are wrong, but some models are useful". When both agree, the parametric assumptions are consistent with the data. When they disagree, that serves as evidence that the finite sample doesn't match the imposed structure of the regression model. Both answers are useful. This doesn't mean the parametric assumptions are *necessarily* wrong, it means the data themselves do not strictly match what the parametric, additive, and linear assumptions of regression impose. This could be due to noise, this could be due a mismatch in assumptions and reality, or some mix of the two. 
 
