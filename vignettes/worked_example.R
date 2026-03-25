@@ -11,11 +11,6 @@
 #   Part 6 — The $df interface for programmatic access
 #   Part 7 — Binary outcomes
 #
-# Before running, rebuild the package:
-#   Rcpp::compileAttributes()
-#   roxygen2::roxygenize()
-#   devtools::load_all()
-#
 #
 # --- Parallelism ---
 #
@@ -56,6 +51,7 @@
 #
 # Both layers are independent — you can use one, both, or neither.
 # ============================================================
+
 
 library(inf.ranger)
 library(infForest)

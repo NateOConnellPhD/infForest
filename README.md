@@ -2,19 +2,19 @@
 
 > Nonparametric inference from random forests — effects, predictions, and uncertainty quantification
 
-**infForest** is an R package that turns random forests into full inferential procedures. It provides effect estimates for any predictor (continuous, binary, or categorical), nonlinear effect curves, interaction detection, prediction intervals, confidence intervals for predicted probabilities, and variance decomposition diagnostics — all without functional form assumptions.
+**infForest** is an R package that implements the Inference Forest framework for statistical inference. It provides effect estimates for any predictor (continuous, binary, or categorical), nonlinear effect curves, interaction detection, prediction intervals, confidence intervals for predicted probabilities, and variance decomposition diagnostics — all without functional form assumptions.
 
 ## What is this framework?
 
-This is a complement to regression, not a replacement. Regression answers: *what do these data say about parameter estimates given my imposed assumptions about the functional form?* Inference forests answer: *what do the data themselves say about the effects without any imposed restrictions?*
+This is a complement to regression, not a replacement. Regression answers the question: *what do these data say about parameter estimates given my imposed assumptions about the functional form?* Inference forests answer the question: *what do the data themselves say about the effects without any imposed restrictions?*
 
-When both agree, the parametric assumptions are consistent with the data. When they disagree, the finite sample doesn't match the imposed structure. Both answers are useful.
+As the saying goes, "All models are wrong, but some models are useful". When both agree, the parametric assumptions are consistent with the data. When they disagree, that serves as evidence that the finite sample doesn't match the imposed structure of the regression model. Both answers are useful. This doesn't mean the parametric assumptions are *necessarily* wrong, it means the data themselves do not strictly match what the parametric, additive, and linear assumptions of regression impose. This could be due to noise, this could be due a mismatch in assumptions and reality, or some mix of the two. 
 
 **Nonparametric.** No linearity, no additivity, no link functions. The forest discovers the functional form from the data. For binary outcomes, predicted probabilities live on [0, 1] naturally — no logit link, no linearity on the log-odds scale.
 
-**Asymptotically unbiased.** As sample size grows, the estimates converge to the true effects. In finite samples, the estimates are provably conservative — they underestimate effects, never overestimate. This conservative bias decreases with sample size and with model simplicity (fewer predictors, less complexity). If you see an effect, it's there. If you don't, it may be attenuated by the nonparametric smoothing.
+**Asymptotically unbiased.** As sample size grows, the estimates converge to the true effects. In finite samples, the estimates are provably conservative — they underestimate effects on average. This conservative bias decreases with sample size and with model simplicity (fewer predictors, less complexity). If you see an effect, it exists in the finite sample. 
 
-**Confounding adjustment.** Effects are adjusted for all other variables in the model through the AIPW framework. The propensity model (estimated by ridge regression) corrects for confounding, analogous to including covariates in a regression model. The correction is doubly robust: the estimate is consistent if either the forest predictions or the propensity model is correctly specified.
+**Confounding adjustment.** Effects are adjusted for all other variables in the model. The propensity model within the doubly robust agumented inverse probabilitiy weighting (AIPW) framework (propensity estimated by ridge regression) corrects for confounding, analogous to including covariates in a regression model. The correction is doubly robust: the estimate is consistent if either the forest predictions or the propensity model is correctly specified.
 
 **No p-values by design.** The package focuses on effect sizes and precision. Every estimate comes with a standard error and confidence interval at a user-specified level (default 95%). P-values are available via `p.value = TRUE` but are not shown by default. The deliberate default reflects a focus on practical significance over null hypothesis testing.
 
@@ -40,16 +40,16 @@ devtools::install_github("NateOConnellPhD/infForest")
 
 infForest uses [ranger](https://github.com/imbs-hl/ranger) as its forest engine. The `inf.ranger` package is a minimal fork of ranger with two targeted modifications to the split selection code — the tree-growing algorithm, prediction machinery, and all other ranger internals are unchanged.
 
-**`penalize.split.competition`** — At each node, CART selects the variable with the largest impurity reduction. But continuous variables evaluate many more candidate split points than binary variables, giving them a structural advantage. The standardized criterion subtracts the expected search advantage from each variable's best split score, producing a level comparison across variable types. The correction is closed-form and adds negligible computation.
+**`penalize.split.competition`** — At each node, standard CART selects the variable with the largest impurity reduction. But continuous variables have an inherit advantage in that they evaluate many more candidate split points than binary variables. It's effectively a multiple comparison problem within split selection. This gives them a structural advantage over binary variables, even when the true signal is equal. Further, continuous variables have the advantage of giving their split perfect balance (e.g. splitting a the median), exacerbating their advantage. The standardized criterion subtracts the expected search advantage from each variable's best split score, producing a level comparison across variable types. The correction is closed-form and adds negligible computation.
 
 **`softmax.split`** — Standard CART selects the single best variable at each node (argmax). Softmax replaces this with probabilistic selection: variables are chosen with probability proportional to their penalized criterion scores. This increases the inclusion rate for variables with moderate but real signal. 
 
 Both modifications operate only at the moment of variable selection within each node. Everything downstream — split point selection, daughter node assignment, leaf predictions, prediction — is identical to standard ranger.
 
 
-### Parallelism
+### Computational speed and Parallelism
 
-infForest has two independent parallelism layers. Both are optional.
+infForest has two independent parallelism layers. Both are optional, but recommended for optimal performance. We've designed this packaged with computational speed and efficiency in mind. Back-end processing is optimized in C++ wherever possible, while necessary fitted forest information is cached in the working memory for immediate access for effect and variance estimation. 
 
 **R-level (future/future.apply):** PASR fitting distributes independent paired-forest replicates across worker processes. Set up once at the top of your script:
 
@@ -71,9 +71,9 @@ On macOS, OpenMP requires `libomp` (`brew install libomp`) and the appropriate f
 
 ## Part 1: Pointwise Predictions and Prediction Intervals
 
-Pointwise predictions with variance estimates and prediction intervals are a standalone contribution of the PASR (Procedure-Aligned Synthetic Resampling) framework. PASR is the only approach available for variance estimation of pointwise random forest predictions.
+Pointwise predictions with variance estimates and prediction intervals are a standalone contribution of the PASR (Procedure-Aligned Synthetic Resampling) framework. PASR provides finite sample variance estimation along with pointwise prediction and confidence intervals for Random Forest fitted models.
 
-`pasr_predict()` takes a fitted `ranger` model and the training data, fits once, and then predicts at any new points via `predict()`. For pure prediction, fitting ranger on the full dataset is recommended — no data halving from honest splitting.
+`pasr_predict()` takes a fitted `ranger` model and the training data, fits once, and then predicts at any new points via `predict()`. We will be adding support for additional RF based packages. For pure prediction, fitting ranger on the full dataset is recommended — no data halving from honest splitting through infForest is needed.
 
 For continuous outcomes, two types of intervals are returned:
 
@@ -110,7 +110,7 @@ head(pi[, c("f_hat", "se", "ci_lower", "ci_upper", "pi_lower", "pi_upper")])
 
 ### Confidence intervals for predicted probabilities (binary)
 
-For binary outcomes, predicted probabilities live on [0, 1] naturally. No logit link, no back-transformation.
+For binary outcomes, predicted probabilities live on [0, 1] naturally. No logit link, no back-transformation -- the probabilities are estimated on their natural scale. 
 
 ```r
 rf_bin <- ranger(y ~ ., data = dat_bin, num.trees = 5000, probability = TRUE)
@@ -123,7 +123,7 @@ head(pi_bin[, c("f_hat", "se", "ci_lower", "ci_upper")])
 
 ### Covariance floor diagnostic
 
-`ct_diagnose()` decomposes the forest variance into Monte Carlo variance (V/B, vanishes with more trees) and the covariance floor (C_T, irreducible structural dependence). Pass the already-fitted PASR object — no refitting.
+`ct_diagnose()` decomposes the forest variance into Monte Carlo variance (V/B, goes to zero with more trees) and the covariance floor (C_T, irreducible structural dependence). Pass the already-fitted PASR object — no refitting.
 
 ```r
 ct <- ct_diagnose(ps, data = dat)
@@ -151,7 +151,7 @@ Two variance estimators are available for all effect estimates, controlled by th
 
 **Sandwich variance** (`variance = "sandwich"`) estimates the conditional variance given the observed covariates X — the variability from only redrawing Y while holding X fixed. This is analogous to the standard variance reported by `lm()` and most regression procedures.
 
-The difference between them is typically small (rho_V ≈ 0.97 in examples below), but the unconditional PASR variance is the technically correct target for inference about population-level effects. PASR is the default because the paired forests are already cached after calling `pasr()`, so both estimators are equally fast to compute. Use `variance = "both"` to see both side by side.
+The difference between them is typically small (PASR/sandwich ≈ 0.97 in examples below), but the unconditional PASR variance is the technically correct target for inference about population-level effects. PASR is the default because the paired forests are already cached after calling `pasr()`, so both estimators are equally fast to compute. Use `variance = "both"` to see both side by side.
 
 ### Binary effects
 
@@ -199,7 +199,7 @@ effect(fit, "noise", p.value = TRUE)
 
 ### Categorical effects
 
-For categorical predictors, `effect()` computes all pairwise AIPW contrasts. Each pair is treated as a binary comparison restricted to observations at those two levels, with a pair-specific propensity model. The `at` argument selects specific levels to compare.
+For categorical predictors, `effect()` computes all pairwise contrasts. Each pair is treated as a binary comparison restricted to observations at those two levels, with a pair-specific propensity model. The `at` argument selects specific levels to compare.
 
 ```r
 effect(fit, "group", p.value = TRUE)
@@ -214,9 +214,9 @@ effect(fit, "group", at = c("A", "C"))                # specific contrast
 
 `effect_curve()` traces the full nonparametric relationship between a continuous predictor and the outcome. Two types are available:
 
-The **slope curve** (`type = "slope"`, default) estimates the local derivative df/dx at a grid of points across the predictor's range. This shows how the outcome changes per unit change in the predictor at each location — revealing nonlinearity, plateaus, and threshold effects.
+The **slope curve** (`type = "slope"`) estimates the local derivative df/dx at a grid of points across the predictor's range. This shows how the outcome changes per unit change in the predictor at each location — revealing nonlinearity, plateaus, and threshold effects. This curve may seem abstract at first. The effect plotted on yht Y-axis is not the outcome of the model, it is the estimated *slope* of X on Y across the support of X. A horizontal line represents a constant slope between X and Y over that region of X; An increasing slope represents a non-linear increasing slope; A decreasing slope estimate represents a non-linear decreasing slope. 
 
-The **level curve** (`type = "level"`) integrates the slope curve to reconstruct f(x) up to an additive constant. This shows the shape of the forest's learned partial effect, directly comparable to a regression curve.
+The **level curve** (`type = "level"`, default) integrates the slope curve to reconstruct f(x) up to an additive constant. This shows the shape of the forest's learned partial effect, directly comparable to a regression curve. That is, this shows the estimated relationship between X and Y, adjusted for by the model. 
 
 The `q_lo` and `q_hi` arguments trim the grid to avoid extrapolation in sparse tails.
 
@@ -236,7 +236,7 @@ plot(ec_level)
 
 `int()` estimates how the effect of one variable changes across levels of another. For each level of the `by` variable, it computes the effect of the primary variable within that subgroup, then tests whether the subgroup effects differ. This is analogous to an interaction term in regression, but without assuming the interaction is multiplicative or linear.
 
-The subgroup effects use the same estimation machinery as `effect()` — AIPW-debiased contrasts within each stratum. The difference between subgroup effects is a contrast of contrasts, with its own SE and CI.
+The subgroup effects use the same estimation machinery as `effect()` — that is, contrasts within each stratum. The difference between subgroup effects is a contrast of contrasts, with its own SE and CI.
 
 ```r
 int(fit, "x2", by = "trt", p.value = TRUE)

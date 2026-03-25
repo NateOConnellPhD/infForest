@@ -30,7 +30,7 @@ effect_curve <- function(object, ...) UseMethod("effect_curve")
 #' @rdname effect_curve
 #' @export
 effect_curve.infForest <- function(object, var, q_lo = 0.10, q_hi = 0.90,
-                                   bw = 20L, type = c("slope", "level"),
+                                   bw = 20L, type = c("level","slope"),
                                    alpha = 0.05, propensity_trees = 2000L,
                                    R = 50L, ...) {
   check_infForest(object)
